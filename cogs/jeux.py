@@ -1,232 +1,33 @@
+"""Commandes et surveillance des jeux gratuits.
+
+Ce cog ne contient que la logique Discord : les messages sont construits dans
+`utils.embeds`, les permissions dans `utils.permissions`, les réglages dans
+`config.py` et l'appel à l'API dans `services.gamerpower`.
+"""
+
 import logging
-from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import config
 import database
 from services import gamerpower
+from utils import platforms
+from utils.embeds import build_game_message, build_roles_embed
+from utils.permissions import (
+    admin_note,
+    category_overwrites,
+    clean_access_roles,
+    describe_access,
+    game_channel_overwrites,
+    roles_channel_overwrites,
+)
 
 log = logging.getLogger(__name__)
 
-# clé -> (nom affiché, mots-clés cherchés dans le champ "platforms" de l'API)
-PLATFORMS = {
-    "steam": ("Steam", ["steam"]),
-    "epic": ("Epic Games Store", ["epic games"]),
-    "gog": ("GOG", ["gog"]),
-    "ubisoft": ("Ubisoft", ["ubisoft"]),
-}
-
-# clé -> (emoji, couleur du rôle et des annonces)
-STYLE = {
-    "steam": ("🔵", 0x66C0F4),
-    "epic": ("⚪", 0xD9D9D9),
-    "gog": ("🟣", 0xA855F7),
-    "ubisoft": ("🔷", 0x0070FF),
-}
-DEFAULT_STYLE = ("🎁", 0xF1C40F)
-
-AUTO_KEYS = list(PLATFORMS)
-
-MAX_GAMES = 10  # nombre de jeux récents examinés à chaque vérification
-CATEGORY_NAME = "🎮 Jeux gratuits"
-ROLES_CHANNEL = "choisir-ses-roles"
-ROLES_TOPIC = "Clique sur un bouton pour recevoir les alertes • salon en lecture seule"
-ROLES_CHANNEL_HINT = f"`#{ROLES_CHANNEL}`"
-MAX_ACCESS_ROLES = 10  # rôles maximum autorisés à voir le salon des rôles
-
-
-def role_name(key: str) -> str:
-    return f"{STYLE.get(key, DEFAULT_STYLE)[0]} {PLATFORMS[key][0]}"
-
-
-def role_color(key: str) -> discord.Colour:
-    return discord.Colour(STYLE.get(key, DEFAULT_STYLE)[1])
-
-
-def matches(game: dict, selected: list) -> bool:
-    text = (game.get("platforms") or "").lower()
-    for key in selected:
-        if key in PLATFORMS and any(kw in text for kw in PLATFORMS[key][1]):
-            return True
-    return False
-
-
-def detect_platform(game: dict):
-    for key in AUTO_KEYS:
-        if matches(game, [key]):
-            return key
-    return None
-
-
-# ---------- Jolis messages ----------
-
-
-def format_end_date(raw: str) -> str:
-    """'2026-10-05 23:59:00' -> compte à rebours + date complète (heure locale de chacun)."""
-    try:
-        dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        ts = int(dt.timestamp())
-        return f"<t:{ts}:R>\n<t:{ts}:f>"
-    except (ValueError, TypeError):
-        return "Pas de date limite connue"
-
-
-def format_price(worth) -> str:
-    if not worth or str(worth).strip().upper() == "N/A":
-        return "**GRATUIT**"
-    return f"~~{worth}~~ ➜ **GRATUIT**"
-
-
-def clean_description(text: str, limit: int = 220) -> str:
-    text = " ".join((text or "").split())
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(" ", 1)[0] + "…"
-
-
-def build_message(game: dict):
-    key = detect_platform(game)
-    emoji, color = STYLE.get(key, DEFAULT_STYLE)
-    title = game.get("title", "Jeu gratuit").replace(" Giveaway", "")
-    url = game.get("open_giveaway_url") or game.get("gamerpower_url")
-
-    embed = discord.Embed(
-        title=f"{emoji} {title}",
-        url=url,
-        description=clean_description(game.get("description")),
-        color=color,
-        timestamp=datetime.now(timezone.utc),
-    )
-    embed.set_author(name="🎁 NOUVEAU JEU GRATUIT")
-    embed.add_field(name="💰 Prix", value=format_price(game.get("worth")), inline=True)
-    embed.add_field(name="⏳ Fin de l'offre", value=format_end_date(game.get("end_date")), inline=True)
-    embed.add_field(name="🖥️ Plateformes", value=game.get("platforms") or "N/A", inline=False)
-    if game.get("thumbnail"):
-        embed.set_image(url=game["thumbnail"])
-    embed.set_footer(text="Source : GamerPower")
-
-    view = discord.ui.View()
-    if url:
-        view.add_item(
-            discord.ui.Button(
-                style=discord.ButtonStyle.link,
-                label="Récupérer le jeu",
-                emoji="🎁",
-                url=url,
-            )
-        )
-    return embed, view
-
-
-# ---------- Permissions des salons ----------
-
-# Tout ce qu'on retire dans un salon en lecture seule : écrire, réagir, ouvrir un fil,
-# lancer un sondage, envoyer un vocal, utiliser une commande... bref, regarder et c'est tout.
-READONLY_DENY = (
-    "send_messages",
-    "send_messages_in_threads",
-    "create_public_threads",
-    "create_private_threads",
-    "manage_threads",
-    "add_reactions",
-    "send_tts_messages",
-    "attach_files",
-    "embed_links",
-    "mention_everyone",
-    "manage_messages",
-    "use_application_commands",
-    "send_voice_messages",
-    "create_polls",
-    "send_polls",
-)
-
-BOT_ALLOW = (
-    "view_channel",
-    "read_message_history",
-    "send_messages",
-    "embed_links",
-    "attach_files",
-    "manage_messages",  # pour nettoyer le salon des rôles
-)
-
-
-def _overwrite(**flags) -> discord.PermissionOverwrite:
-    """PermissionOverwrite en ignorant les permissions absentes de cette version de discord.py."""
-    known = discord.Permissions.VALID_FLAGS
-    return discord.PermissionOverwrite(**{k: v for k, v in flags.items() if k in known})
-
-
-def _bot_can(guild: discord.Guild, name: str) -> bool:
-    """Discord refuse qu'on autorise/interdise une permission que le bot n'a pas lui-même."""
-    return bool(getattr(guild.me.guild_permissions, name, False))
-
-
-def bot_overwrite(guild: discord.Guild) -> discord.PermissionOverwrite:
-    return _overwrite(**{name: True for name in BOT_ALLOW if _bot_can(guild, name)})
-
-
-def readonly_overwrite(guild: discord.Guild) -> discord.PermissionOverwrite:
-    """Voir le salon, le lire, cliquer sur les boutons. Rien d'autre."""
-    flags = {name: False for name in READONLY_DENY if _bot_can(guild, name)}
-    flags["view_channel"] = True
-    flags["read_message_history"] = True
-    return _overwrite(**flags)
-
-
-def hidden_overwrite(guild: discord.Guild) -> discord.PermissionOverwrite:
-    """Salon masqué, et verrouillé en écriture au cas où la vue serait rendue ailleurs."""
-    flags = {name: False for name in READONLY_DENY if _bot_can(guild, name)}
-    flags["view_channel"] = False
-    return _overwrite(**flags)
-
-
-def category_overwrites(guild: discord.Guild) -> dict:
-    """Catégorie verrouillée en écriture (sans toucher à la visibilité)."""
-    flags = {name: False for name in READONLY_DENY if _bot_can(guild, name)}
-    return {guild.default_role: _overwrite(**flags), guild.me: bot_overwrite(guild)}
-
-
-def game_channel_overwrites(guild: discord.Guild, role: discord.Role) -> dict:
-    return {
-        guild.default_role: hidden_overwrite(guild),
-        role: readonly_overwrite(guild),
-        guild.me: bot_overwrite(guild),
-    }
-
-
-def clean_access_roles(guild: discord.Guild, roles) -> list:
-    """Garde les rôles réellement utilisables ; @everyone revient à « tout le monde »."""
-    cleaned = []
-    for role in roles or []:
-        if role is None or role.is_default() or role in cleaned:
-            continue
-        cleaned.append(role)
-    return cleaned[:MAX_ACCESS_ROLES]
-
-
-def roles_channel_overwrites(guild: discord.Guild, access_roles=None) -> dict:
-    """Salon des rôles : personne ne peut écrire, jamais.
-
-    - sans rôle précisé : visible par tout le monde, en lecture seule ;
-    - avec des rôles : visible uniquement par ces rôles, toujours en lecture seule.
-    """
-    access_roles = clean_access_roles(guild, access_roles)
-    overwrites = {guild.me: bot_overwrite(guild)}
-    if access_roles:
-        overwrites[guild.default_role] = hidden_overwrite(guild)
-        for role in access_roles:
-            overwrites[role] = readonly_overwrite(guild)
-    else:
-        overwrites[guild.default_role] = readonly_overwrite(guild)
-    return overwrites
-
-
-def describe_access(access_roles) -> str:
-    if access_roles:
-        return ", ".join(role.mention for role in access_roles)
-    return "tout le monde (`@everyone`)"
+ROLES_CHANNEL_HINT = f"`#{config.ROLES_CHANNEL}`"
 
 
 # ---------- Boutons de choix des rôles ----------
@@ -235,8 +36,8 @@ def describe_access(access_roles) -> str:
 class RoleButton(discord.ui.Button):
     def __init__(self, key: str):
         super().__init__(
-            label=PLATFORMS[key][0],
-            emoji=STYLE.get(key, DEFAULT_STYLE)[0],
+            label=platforms.display_name(key),
+            emoji=platforms.emoji(key),
             style=discord.ButtonStyle.secondary,
             custom_id=f"role:{key}",
         )
@@ -257,7 +58,10 @@ class RoleButton(discord.ui.Button):
                 msg = f"Rôle **{role.name}** retiré."
             else:
                 await interaction.user.add_roles(role)
-                msg = f"Rôle **{role.name}** ajouté. Le salon est maintenant visible et tu seras mentionné pour les nouveaux jeux."
+                msg = (
+                    f"Rôle **{role.name}** ajouté. Le salon est maintenant visible "
+                    "et tu seras mentionné pour les nouveaux jeux."
+                )
         except discord.Forbidden:
             msg = "Je ne peux pas gérer ce rôle. Un admin doit me donner la permission **Gérer les rôles**."
         await interaction.response.send_message(msg, ephemeral=True)
@@ -277,12 +81,12 @@ class PlatformSelect(discord.ui.Select):
     def __init__(self, selected=()):
         options = [
             discord.SelectOption(
-                label=PLATFORMS[key][0],
+                label=platforms.display_name(key),
                 value=key,
-                emoji=STYLE.get(key, DEFAULT_STYLE)[0],
+                emoji=platforms.emoji(key),
                 default=key in selected,
             )
-            for key in AUTO_KEYS
+            for key in config.PLATFORM_KEYS
         ]
         super().__init__(
             placeholder="1️⃣ Plateformes à suivre",
@@ -306,7 +110,7 @@ class AccessRoleSelect(discord.ui.RoleSelect):
         kwargs = dict(
             placeholder="2️⃣ Rôles qui voient le salon (vide = tout le monde)",
             min_values=0,
-            max_values=MAX_ACCESS_ROLES,
+            max_values=config.MAX_ACCESS_ROLES,
             row=1,
         )
         try:
@@ -359,16 +163,18 @@ class ConfigView(discord.ui.View):
 
 
 class SetupView(ConfigView):
-    def __init__(self, cog, platforms=(), access_roles=()):
+    """/setup-auto : plateformes à suivre + qui voit le salon des rôles."""
+
+    def __init__(self, cog, platform_keys=(), access_roles=()):
         super().__init__(cog, access_roles)
-        self.platforms = list(platforms)
+        self.platforms = list(platform_keys)
         self.add_item(PlatformSelect(self.platforms))
 
     def summary(self) -> str:
-        plats = ", ".join(PLATFORMS[k][0] for k in self.platforms) if self.platforms else "—"
+        chosen = ", ".join(platforms.display_name(k) for k in self.platforms) or "—"
         return (
             "**Configuration des jeux gratuits**\n"
-            f"1️⃣ Plateformes : **{plats}**\n"
+            f"1️⃣ Plateformes : **{chosen}**\n"
             f"2️⃣ Qui voit {ROLES_CHANNEL_HINT} : {describe_access(self.access_roles)}\n"
             "🔒 Dans tous les cas le salon est en **lecture seule** : on peut le voir, "
             "le lire et cliquer sur les boutons, mais personne ne peut y écrire.\n"
@@ -408,6 +214,27 @@ class AccessView(ConfigView):
         await self.finish(interaction, report)
 
 
+class ConfirmReset(discord.ui.View):
+    """/reset-all : garde-fou avant la suppression."""
+
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+
+    @discord.ui.button(label="Tout supprimer", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Nettoyage en cours...", view=None)
+        report = await self.cog.wipe_guild(interaction.guild)
+        try:
+            await interaction.edit_original_response(content=report)
+        except discord.HTTPException:
+            pass  # par exemple si la commande a été lancée dans un salon supprimé
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Annulé, rien n'a été supprimé.", view=None)
+
+
 # ---------- Le cog ----------
 
 
@@ -415,16 +242,70 @@ class Jeux(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.roles_channels = {}  # {serveur: salon des rôles} pour le nettoyage des messages
+        self.check_games.change_interval(hours=config.CHECK_INTERVAL_HOURS)
         self.check_games.start()
 
     async def cog_load(self):
-        self.bot.add_view(RolesView(AUTO_KEYS))
+        self.bot.add_view(RolesView(config.PLATFORM_KEYS))
         self.roles_channels = await database.get_all_roles_channels()
 
     async def cog_unload(self):
         self.check_games.cancel()
 
     # ----- création / mise à jour -----
+
+    async def ensure_platform_role(self, guild: discord.Guild, key: str) -> discord.Role:
+        """Crée le rôle de la plateforme, ou remet son nom et sa couleur à jour."""
+        wanted = platforms.role_name(key)
+        role = None
+        role_id = await database.get_platform_role(guild.id, key)
+        if role_id:
+            role = guild.get_role(role_id)
+        if role is None:
+            role = discord.utils.get(guild.roles, name=wanted) or discord.utils.get(
+                guild.roles, name=f"Jeux {platforms.display_name(key)}"
+            )
+        if role is None:
+            role = await guild.create_role(
+                name=wanted,
+                colour=platforms.role_colour(key),
+                mentionable=True,
+                reason="Rôle d'alerte jeux gratuits",
+            )
+        else:
+            await role.edit(
+                name=wanted,
+                colour=platforms.role_colour(key),
+                mentionable=True,
+                reason="Mise à jour du rôle jeux gratuits",
+            )
+        await database.set_platform_role(guild.id, key, role.id)
+        return role
+
+    async def ensure_platform_channel(
+        self,
+        guild: discord.Guild,
+        category: discord.CategoryChannel,
+        key: str,
+        role: discord.Role,
+        known_id=None,
+    ) -> discord.TextChannel:
+        """Salon de la plateforme : invisible sans le rôle, lecture seule avec."""
+        overwrites = game_channel_overwrites(guild, role)
+        name = platforms.channel_name(key)
+        channel = guild.get_channel(known_id) if known_id else None
+        if channel is None:
+            channel = discord.utils.get(category.text_channels, name=name)
+        if channel is None:
+            channel = await category.create_text_channel(
+                name,
+                topic=f"Jeux gratuits : {platforms.display_name(key)}",
+                overwrites=overwrites,
+            )
+        else:
+            await channel.edit(overwrites=overwrites)
+        await database.set_platform_channel(guild.id, key, channel.id)
+        return channel
 
     async def ensure_roles_channel(
         self, guild: discord.Guild, category: discord.CategoryChannel, access_roles: list
@@ -437,14 +318,14 @@ class Jeux(commands.Cog):
         if channel_id:
             channel = guild.get_channel(channel_id)
         if channel is None:
-            channel = discord.utils.get(category.text_channels, name=ROLES_CHANNEL)
+            channel = discord.utils.get(category.text_channels, name=config.ROLES_CHANNEL)
 
         if channel is None:
             channel = await category.create_text_channel(
-                ROLES_CHANNEL, topic=ROLES_TOPIC, overwrites=overwrites
+                config.ROLES_CHANNEL, topic=config.ROLES_TOPIC, overwrites=overwrites
             )
         else:
-            await channel.edit(overwrites=overwrites, topic=ROLES_TOPIC)
+            await channel.edit(overwrites=overwrites, topic=config.ROLES_TOPIC)
 
         await database.set_roles_channel(guild.id, channel.id)
         await database.set_roles_channel_access(guild.id, [r.id for r in access_roles])
@@ -455,84 +336,32 @@ class Jeux(commands.Cog):
         async for old in channel.history(limit=20):
             if old.author.id == channel.guild.me.id:
                 await old.delete()
-        embed = discord.Embed(
-            title="🎮 Choisis tes alertes jeux gratuits",
-            description=(
-                "Clique sur un bouton pour **recevoir** le rôle d'une plateforme "
-                "et débloquer son salon. Reclique pour le **retirer**.\n\n"
-                "Tu seras mentionné quand un jeu gratuit sort sur cette plateforme."
-            ),
-            color=discord.Color.gold(),
-        )
-        embed.set_footer(text="Salon en lecture seule : seuls les boutons fonctionnent ici.")
-        await channel.send(embed=embed, view=RolesView(keys))
+        await channel.send(embed=build_roles_embed(), view=RolesView(keys))
 
-    async def apply_setup(self, guild: discord.Guild, platforms: list, access_roles: list) -> str:
+    async def apply_setup(self, guild: discord.Guild, platform_keys: list, access_roles: list) -> str:
+        """Crée/met à jour la catégorie, les rôles, les salons et le panneau des rôles."""
         access_roles = clean_access_roles(guild, access_roles)
         created = []
         try:
-            category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+            category = discord.utils.get(guild.categories, name=config.CATEGORY_NAME)
             if category is None:
                 category = await guild.create_category(
-                    CATEGORY_NAME, overwrites=category_overwrites(guild)
+                    config.CATEGORY_NAME, overwrites=category_overwrites(guild)
                 )
 
-            saved_channels = await database.get_platform_channels(guild.id)
-            for key in platforms:
-                new_name = role_name(key)
-                color = role_color(key)
-
-                # 1) le rôle (réutilisé et recoloré s'il existe déjà)
-                role = None
-                role_id = await database.get_platform_role(guild.id, key)
-                if role_id:
-                    role = guild.get_role(role_id)
-                if role is None:
-                    role = discord.utils.get(guild.roles, name=new_name) or discord.utils.get(
-                        guild.roles, name=f"Jeux {PLATFORMS[key][0]}"
-                    )
-                if role is None:
-                    role = await guild.create_role(
-                        name=new_name,
-                        colour=color,
-                        mentionable=True,
-                        reason="Rôle d'alerte jeux gratuits",
-                    )
-                else:
-                    await role.edit(
-                        name=new_name,
-                        colour=color,
-                        mentionable=True,
-                        reason="Mise à jour du rôle jeux gratuits",
-                    )
-                await database.set_platform_role(guild.id, key, role.id)
-
-                # 2) le salon : caché sans le rôle, lecture seule
-                name = f"jeux-{key}"
-                overwrites = game_channel_overwrites(guild, role)
-                channel = None
-                channel_id = saved_channels.get(key)
-                if channel_id:
-                    channel = guild.get_channel(channel_id)
-                if channel is None:
-                    channel = discord.utils.get(category.text_channels, name=name)
-                if channel is None:
-                    channel = await category.create_text_channel(
-                        name,
-                        topic=f"Jeux gratuits : {PLATFORMS[key][0]}",
-                        overwrites=overwrites,
-                    )
-                else:
-                    await channel.edit(overwrites=overwrites)
-                await database.set_platform_channel(guild.id, key, channel.id)
+            known_channels = await database.get_platform_channels(guild.id)
+            for key in platform_keys:
+                role = await self.ensure_platform_role(guild, key)
+                channel = await self.ensure_platform_channel(
+                    guild, category, key, role, known_channels.get(key)
+                )
                 created.append(f"{channel.mention} → {role.mention}")
 
-            # 3) le salon de choix des rôles : lecture seule, en premier
             roles_channel = await self.ensure_roles_channel(guild, category, access_roles)
             await roles_channel.move(beginning=True, category=category)
 
             saved = await database.get_guild_platform_roles(guild.id)
-            await self.post_roles_message(roles_channel, [k for k in AUTO_KEYS if k in saved])
+            await self.post_roles_message(roles_channel, [k for k in config.PLATFORM_KEYS if k in saved])
 
         except discord.Forbidden:
             return (
@@ -545,22 +374,24 @@ class Jeux(commands.Cog):
             + "\n".join(created)
             + f"\nChoix des rôles : {roles_channel.mention} "
             + f"(lecture seule, visible par : {describe_access(access_roles)})"
-            + admin_note(roles_channel.guild)
+            + admin_note(guild)
         )
 
     async def apply_access(self, guild: discord.Guild, access_roles: list) -> str:
+        """Change qui voit le salon des rôles, sans toucher au reste."""
         access_roles = clean_access_roles(guild, access_roles)
-        category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
         channel_id = await database.get_roles_channel(guild.id)
         channel = guild.get_channel(channel_id) if channel_id else None
-        if channel is None and category is not None:
-            channel = discord.utils.get(category.text_channels, name=ROLES_CHANNEL)
+        if channel is None:
+            category = discord.utils.get(guild.categories, name=config.CATEGORY_NAME)
+            if category is not None:
+                channel = discord.utils.get(category.text_channels, name=config.ROLES_CHANNEL)
         if channel is None:
             return "Je ne trouve pas le salon des rôles. Lance d'abord `/setup-auto`."
 
         try:
             await channel.edit(
-                overwrites=roles_channel_overwrites(guild, access_roles), topic=ROLES_TOPIC
+                overwrites=roles_channel_overwrites(guild, access_roles), topic=config.ROLES_TOPIC
             )
         except discord.Forbidden:
             return "Il me manque la permission **Gérer les salons** pour modifier ce salon."
@@ -617,12 +448,15 @@ class Jeux(commands.Cog):
                     pass
 
         # salons restants de la catégorie, puis la catégorie si elle est vide
-        category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+        category = discord.utils.get(guild.categories, name=config.CATEGORY_NAME)
         if category:
             for channel in list(category.text_channels):
                 if channel.id in deleted:
                     continue
-                if channel.name == ROLES_CHANNEL or channel.name.startswith("jeux-"):
+                cree_par_le_bot = channel.name == config.ROLES_CHANNEL or channel.name.startswith(
+                    config.GAME_CHANNEL_PREFIX
+                )
+                if cree_par_le_bot:
                     await delete_channel(channel)
             if all(c.id in deleted for c in category.channels):
                 try:
@@ -672,9 +506,9 @@ class Jeux(commands.Cog):
         else:
             category = getattr(channel, "category", None)
             if (
-                getattr(channel, "name", None) != ROLES_CHANNEL
+                getattr(channel, "name", None) != config.ROLES_CHANNEL
                 or category is None
-                or category.name != CATEGORY_NAME
+                or category.name != config.CATEGORY_NAME
             ):
                 return
         try:
@@ -682,22 +516,23 @@ class Jeux(commands.Cog):
         except discord.Forbidden:
             log.warning(
                 "Impossible de supprimer un message dans #%s : il me faut la permission Gérer les messages.",
-                ROLES_CHANNEL,
+                config.ROLES_CHANNEL,
             )
         except discord.HTTPException:
             pass
 
     async def run_check(self) -> int:
+        """Envoie les jeux gratuits pas encore annoncés. Retourne le nombre d'annonces."""
         games = await gamerpower.fetch_giveaways()
         routes = await database.get_routes()
         roles = await database.get_all_platform_roles()
         mentions = discord.AllowedMentions(roles=True)
         sent = 0
-        for game in games[:MAX_GAMES]:
+        for game in games[: config.MAX_GAMES]:
             item_id = str(game.get("id"))
-            embed, view = build_message(game)
+            embed, view = build_game_message(game)
             for guild_id, route, channel_id, _ in routes:
-                if not matches(game, [route]):
+                if not platforms.matches(game, [route]):
                     continue
                 sent_key = f"{item_id}:{route}"
                 if await database.is_sent(guild_id, sent_key):
@@ -733,6 +568,10 @@ class Jeux(commands.Cog):
 
     # ----- commandes -----
 
+    async def saved_access_roles(self, guild: discord.Guild) -> list:
+        saved = await database.get_roles_channel_access(guild.id)
+        return clean_access_roles(guild, [guild.get_role(role_id) for role_id in saved])
+
     @app_commands.command(
         name="setup-auto",
         description="Crée les salons privés, les rôles et le salon de choix des rôles",
@@ -741,10 +580,12 @@ class Jeux(commands.Cog):
     @app_commands.guild_only()
     async def setup_auto(self, interaction: discord.Interaction):
         guild = interaction.guild
-        platforms = [k for k in AUTO_KEYS if k in await database.get_platform_channels(guild.id)]
-        saved_access = await database.get_roles_channel_access(guild.id)
-        access_roles = clean_access_roles(guild, [guild.get_role(r) for r in saved_access])
-        view = SetupView(self, platforms, access_roles)
+        known = await database.get_platform_channels(guild.id)
+        view = SetupView(
+            self,
+            [k for k in config.PLATFORM_KEYS if k in known],
+            await self.saved_access_roles(guild),
+        )
         await interaction.response.send_message(
             view.summary(),
             view=view,
@@ -759,10 +600,7 @@ class Jeux(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
     async def acces_salon_roles(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        saved_access = await database.get_roles_channel_access(guild.id)
-        access_roles = clean_access_roles(guild, [guild.get_role(r) for r in saved_access])
-        view = AccessView(self, access_roles)
+        view = AccessView(self, await self.saved_access_roles(interaction.guild))
         await interaction.response.send_message(
             view.summary(),
             view=view,
@@ -778,14 +616,16 @@ class Jeux(commands.Cog):
     @app_commands.guild_only()
     async def reset_all(self, interaction: discord.Interaction):
         await interaction.response.send_message(
-            "⚠️ Cela supprime **tous** les salons de jeux, `#choisir-ses-roles`, la catégorie, "
+            f"⚠️ Cela supprime **tous** les salons de jeux, {ROLES_CHANNEL_HINT}, la catégorie, "
             "les rôles de plateforme et les anciens messages du bot. C'est **définitif**.\n"
             "Conseil : lance cette commande depuis un autre salon que ceux du bot.",
             view=ConfirmReset(self),
             ephemeral=True,
         )
 
-    @app_commands.command(name="reset-jeux", description="Rejoue les annonces (vide l'historique des envois)")
+    @app_commands.command(
+        name="reset-jeux", description="Rejoue les annonces (vide l'historique des envois)"
+    )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
     async def reset_jeux(self, interaction: discord.Interaction):
@@ -802,37 +642,6 @@ class Jeux(commands.Cog):
         count = await self.run_check()
         await interaction.followup.send(f"{count} annonce(s) envoyée(s).", ephemeral=True)
 
-
-# ---------- /reset-all ----------
-
-
-class ConfirmReset(discord.ui.View):
-    def __init__(self, cog: Jeux):
-        super().__init__(timeout=60)
-        self.cog = cog
-
-    @discord.ui.button(label="Tout supprimer", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Nettoyage en cours...", view=None)
-        report = await self.cog.wipe_guild(interaction.guild)
-        try:
-            await interaction.edit_original_response(content=report)
-        except discord.HTTPException:
-            pass  # par exemple si la commande a été lancée dans un salon supprimé
-
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Annulé, rien n'a été supprimé.", view=None)
-
-
-def admin_note(guild: discord.Guild) -> str:
-    """Les permissions de salon ne bloquent pas les admins : on prévient que le bot nettoie."""
-    if _bot_can(guild, "manage_messages"):
-        return "\nℹ️ Les admins passent outre les permissions Discord : leurs messages y sont supprimés automatiquement."
-    return (
-        "\n⚠️ Donne-moi la permission **Gérer les messages** : sans elle je ne peux pas effacer "
-        "les messages des administrateurs, que Discord laisse toujours écrire partout."
-    )
 
 
 async def setup(bot: commands.Bot):

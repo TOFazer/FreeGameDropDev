@@ -1,3 +1,17 @@
+# Secrets et données locales
 .env
 *.db
+
+# Python
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Outils
+.pytest_cache/
+.ruff_cache/
+
+# Éditeurs
+.idea/
+.vscode/

@@ -1,16 +1,16 @@
-import os
+"""Point d'entrée du bot : python main.py"""
+
+import logging
 
 import discord
 from discord.ext import commands
-from dotenv import load_dotenv
 
+import config
 import database
 
-load_dotenv()
+log = logging.getLogger(__name__)
 
-# Serveur de test où d'anciennes copies de commandes avaient été envoyées.
-# Le nettoyage ci-dessous évite les doublons et le message "commande obsolète".
-TEST_GUILD_ID = 1391429196105912452
+EXTENSIONS = ("cogs.setup", "cogs.jeux")
 
 
 class ReleaseBot(commands.Bot):
@@ -19,23 +19,34 @@ class ReleaseBot(commands.Bot):
 
     async def setup_hook(self):
         await database.init_db()
-        await self.load_extension("cogs.setup")
-        await self.load_extension("cogs.jeux")
+        for extension in EXTENSIONS:
+            await self.load_extension(extension)
 
-        # supprime les anciennes copies de commandes sur le serveur de test
-        try:
-            guild = discord.Object(id=TEST_GUILD_ID)
-            self.tree.clear_commands(guild=guild)
-            await self.tree.sync(guild=guild)
-        except discord.HTTPException as e:
-            print("Nettoyage du serveur de test ignoré :", e)
+        # Supprime les anciennes copies de commandes laissées sur le serveur de test
+        # (évite les doublons et le message « commande obsolète »).
+        if config.TEST_GUILD_ID:
+            try:
+                guild = discord.Object(id=config.TEST_GUILD_ID)
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)
+            except discord.HTTPException as e:
+                log.warning("Nettoyage du serveur de test ignoré : %s", e)
 
         synced = await self.tree.sync()
-        print("Commandes envoyées à Discord :", [c.name for c in synced])
+        log.info("Commandes envoyées à Discord : %s", [c.name for c in synced])
 
     async def on_ready(self):
-        print(f"Connecté en tant que {self.user}")
+        log.info("Connecté en tant que %s", self.user)
 
 
-bot = ReleaseBot()
-bot.run(os.getenv("DISCORD_TOKEN"))
+def main():
+    discord.utils.setup_logging(level=getattr(logging, config.LOG_LEVEL, logging.INFO))
+    if not config.DISCORD_TOKEN:
+        raise SystemExit(
+            "DISCORD_TOKEN manquant : copie .env.example en .env et renseigne ton token."
+        )
+    ReleaseBot().run(config.DISCORD_TOKEN, log_handler=None)
+
+
+if __name__ == "__main__":
+    main()
