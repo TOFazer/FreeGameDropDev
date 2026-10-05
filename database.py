@@ -1,6 +1,11 @@
+"""Stockage SQLite : salons, rôles et annonces déjà envoyées."""
+
 import aiosqlite
 
-DB_PATH = "bot.db"
+import config
+
+# Surchargeable via DB_PATH dans .env (et remplacé par un fichier temporaire dans les tests).
+DB_PATH = config.DB_PATH
 
 
 async def init_db():
