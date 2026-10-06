@@ -22,12 +22,18 @@ async def test_les_commandes_sont_enregistrees(bot_discord):
 
     assert noms == [
         "acces-salon-roles",
+        "alertes",
         "config",
+        "dev-stats",
         "favoris",
         "free",
+        "historique",
         "info",
         "mes-donnees",
         "ping",
+        "preferences",
+        "rappel-salon",
+        "recherche",
         "reset-all",
         "reset-jeux",
         "setup-auto",

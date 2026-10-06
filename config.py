@@ -69,6 +69,78 @@ GAMERPOWER_API_URL: str = _env_str("GAMERPOWER_API_URL", "https://www.gamerpower
 GAMERPOWER_TIMEOUT: float = _env_float("GAMERPOWER_TIMEOUT", 15.0)
 
 
+# ---------- Source Epic Games Store ----------
+
+EPIC_API_URL: str = _env_str(
+    "EPIC_API_URL",
+    "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions",
+)
+EPIC_TIMEOUT: float = _env_float("EPIC_TIMEOUT", 15.0)
+EPIC_STORE_URL: str = _env_str("EPIC_STORE_URL", "https://store.epicgames.com")
+EPIC_LOCALE: str = _env_str("EPIC_LOCALE", "fr-FR")
+EPIC_COUNTRY: str = _env_str("EPIC_COUNTRY", "FR")
+
+
+# ---------- Moteur d'agrégation multi-sources ----------
+
+# Sources activées pour /free, les alertes et la veille automatique.
+OFFER_SOURCES: tuple = tuple(
+    source.strip()
+    for source in _env_str("OFFER_SOURCES", "gamerpower,epic").split(",")
+    if source.strip()
+)
+OFFER_SOURCE_TIMEOUT: float = _env_float("OFFER_SOURCE_TIMEOUT", 20.0)
+
+
+# ---------- Fuseau horaire par défaut ----------
+
+DEFAULT_TIMEZONE: str = _env_str("DEFAULT_TIMEZONE", "Europe/Paris")
+
+
+# ---------- Catégorisation des offres ----------
+
+OFFER_TYPE_LABELS: dict = {
+    "game": "🎮 Jeu complet",
+    "dlc": "➕ DLC / extension",
+    "content": "🎁 Contenu / bêta",
+}
+OFFER_TYPE_KEYS = list(OFFER_TYPE_LABELS)
+
+GENRE_LABELS: dict = {
+    "action": "Action",
+    "adventure": "Aventure",
+    "rpg": "RPG",
+    "strategy": "Stratégie",
+    "simulation": "Simulation",
+    "sport": "Sport",
+    "racing": "Course",
+    "puzzle": "Puzzle",
+    "horror": "Horreur",
+    "indie": "Indépendant",
+    "multiplayer": "Multijoueur",
+    "shooter": "Tir",
+}
+GENRE_KEYS = list(GENRE_LABELS)
+
+
+# ---------- Alertes et notifications ----------
+
+USER_NOTIFICATION_EVENT_LABELS: dict = {
+    "new_offer": "🆕 Nouvelle offre",
+    "ending_soon": "⏳ Se termine bientôt",
+}
+REMINDER_EVENT_LABELS: dict = {
+    "ends_today": "📅 Se termine aujourd'hui",
+}
+
+# Délai minimal entre deux alertes identiques envoyées à un même membre, en heures.
+ALERT_CADENCE_HOURS: float = _env_float("ALERT_CADENCE_HOURS", 1.0)
+
+# Fenêtre considérée comme « se termine bientôt » pour les alertes et /free.
+LAST_DAY_HOURS: float = _env_float("LAST_DAY_HOURS", 24.0)
+LAST_HOURS_THRESHOLD: float = _env_float("LAST_HOURS_THRESHOLD", 6.0)
+
+
 # ---------- Salons créés par /setup-auto ----------
 
 CATEGORY_NAME: str = _env_str("CATEGORY_NAME", "🎮 Jeux gratuits")
@@ -114,3 +186,19 @@ PLATFORM_KEYS = list(PLATFORMS)
 # Utilisés quand la plateforme d'un jeu n'est pas reconnue.
 DEFAULT_EMOJI = "🎁"
 DEFAULT_COLOUR = 0xF1C40F
+
+
+# ---------- Tableau de bord web ----------
+
+DASHBOARD_ENABLED: bool = _env_str("DASHBOARD_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+DASHBOARD_HOST: str = _env_str("DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT: int = _env_int("DASHBOARD_PORT", 8080)
+DASHBOARD_SECRET_KEY: str = _env_str("DASHBOARD_SECRET_KEY", "change-me-in-prod")
+DASHBOARD_BASE_URL: str = _env_str("DASHBOARD_BASE_URL", f"http://localhost:{DASHBOARD_PORT}")
+
+DISCORD_CLIENT_ID: str = _env_str("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET: str = _env_str("DISCORD_CLIENT_SECRET")
+DISCORD_OAUTH_REDIRECT_URI: str = _env_str(
+    "DISCORD_OAUTH_REDIRECT_URI", f"{DASHBOARD_BASE_URL}/auth/callback"
+)
+DISCORD_API_BASE_URL: str = _env_str("DISCORD_API_BASE_URL", "https://discord.com/api")

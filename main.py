@@ -16,11 +16,20 @@ EXTENSIONS = ("cogs.setup", "cogs.jeux")
 class ReleaseBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.default())
+        self.dashboard_runner = None
 
     async def setup_hook(self):
         await database.init_db()
         for extension in EXTENSIONS:
             await self.load_extension(extension)
+
+        if config.DASHBOARD_ENABLED:
+            from web.dashboard_server import start_dashboard
+
+            try:
+                self.dashboard_runner = await start_dashboard(self)
+            except OSError as e:
+                log.warning("Tableau de bord web non démarré : %s", e)
 
         # Supprime les anciennes copies de commandes laissées sur le serveur de test
         # (évite les doublons et le message « commande obsolète »).
@@ -37,6 +46,13 @@ class ReleaseBot(commands.Bot):
 
     async def on_ready(self):
         log.info("Connecté en tant que %s", self.user)
+
+    async def close(self):
+        if self.dashboard_runner is not None:
+            from web.dashboard_server import stop_dashboard
+
+            await stop_dashboard(self.dashboard_runner)
+        await super().close()
 
 
 def main():

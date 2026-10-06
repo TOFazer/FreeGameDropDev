@@ -14,9 +14,10 @@ from discord.ext import commands, tasks
 
 import config
 import database
-from services import gamerpower
-from utils import platforms
-from utils.embeds import build_game_message, build_roles_embed
+from services import offer_engine
+from utils import metrics, notifications, platforms
+from utils.embeds import build_game_message, build_roles_embed, source_label
+from utils.offers import filter_offers, normalize_genres
 from utils.permissions import (
     admin_note,
     category_overwrites,
@@ -285,7 +286,8 @@ class GameBrowserView(discord.ui.View):
 
     def current_embed(self) -> discord.Embed:
         embed, _ = build_game_message(self.current_game)
-        embed.set_footer(text=f"Source : GamerPower • {self.page + 1}/{self.page_count}")
+        label = source_label(self.current_game)
+        embed.set_footer(text=f"Source : {label} • {self.page + 1}/{self.page_count}")
         return embed
 
     def _sync_components(self):
@@ -693,16 +695,18 @@ class Jeux(commands.Cog):
 
     async def run_check(self) -> int:
         """Envoie les jeux gratuits pas encore annoncés. Retourne le nombre d'annonces."""
-        response = await gamerpower.fetch_giveaways()
+        response = await offer_engine.fetch_offers()
         games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
         await database.save_giveaways(games)
         routes = await database.get_routes()
         roles = await database.get_all_platform_roles()
         mentions = discord.AllowedMentions(roles=True)
+        new_games = []
         sent = 0
         for game in games[: config.MAX_GAMES]:
             item_id = str(game.get("id"))
             embed, view = build_game_message(game)
+            announced_anywhere = False
             for guild_id, route, channel_id, _ in routes:
                 if not platforms.matches(game, [route]):
                     continue
@@ -723,8 +727,18 @@ class Jeux(commands.Cog):
                     )
                     await database.mark_sent(guild_id, sent_key)
                     sent += 1
+                    announced_anywhere = True
                 except discord.HTTPException as e:
                     log.warning("Envoi impossible sur le serveur %s : %s", guild_id, e)
+            if announced_anywhere:
+                new_games.append(game)
+
+        try:
+            await notifications.notify_new_offers(self.bot, new_games)
+            await notifications.notify_ending_soon(self.bot, games)
+            await notifications.send_guild_reminders(self.bot, games)
+        except Exception:
+            log.exception("Erreur pendant l'envoi des alertes personnelles")
         return sent
 
     @tasks.loop(hours=1)
@@ -741,12 +755,37 @@ class Jeux(commands.Cog):
     # ----- commandes -----
 
     @app_commands.command(name="free", description="Parcourt les offres de jeux gratuits du moment")
+    @app_commands.describe(
+        plateforme="Ne montrer que cette plateforme",
+        type="Ne montrer que ce type d'offre",
+        echeance="Filtrer par date de fin",
+    )
+    @app_commands.choices(
+        plateforme=[
+            app_commands.Choice(name=platforms.display_name(key), value=key)
+            for key in config.PLATFORM_KEYS
+        ],
+        type=[
+            app_commands.Choice(name=label, value=key)
+            for key, label in config.OFFER_TYPE_LABELS.items()
+        ],
+        echeance=[
+            app_commands.Choice(name="Se termine aujourd'hui", value="ends_today"),
+            app_commands.Choice(name="Se termine bientôt (24h)", value="ending_soon"),
+        ],
+    )
     @app_commands.checks.cooldown(1, 15.0, key=lambda interaction: interaction.user.id)
-    async def free(self, interaction: discord.Interaction):
+    async def free(
+        self,
+        interaction: discord.Interaction,
+        plateforme: str | None = None,
+        type: str | None = None,
+        echeance: str | None = None,
+    ):
         """Liste les offres actuelles en privé et permet de les ajouter aux favoris."""
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            response = await gamerpower.fetch_giveaways()
+            response = await offer_engine.fetch_offers()
         except Exception:
             log.exception("Impossible de récupérer les offres pour /free")
             await interaction.followup.send(
@@ -758,6 +797,17 @@ class Jeux(commands.Cog):
         if not isinstance(response, list):
             response = []
         games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        await database.save_giveaways(games)
+
+        preferences = await database.get_user_preferences(interaction.user.id)
+        timezone_name = preferences.get("timezone") or config.DEFAULT_TIMEZONE
+        games = filter_offers(
+            games,
+            platform=plateforme,
+            offer_type=type,
+            period=echeance,
+            timezone_name=timezone_name,
+        )
         if not games:
             await interaction.followup.send(
                 "Aucun jeu gratuit trouvé pour le moment, ou la source est temporairement indisponible.",
@@ -765,7 +815,6 @@ class Jeux(commands.Cog):
             )
             return
 
-        await database.save_giveaways(games)
         view = GameBrowserView(
             games,
             owner_id=interaction.user.id,
@@ -829,6 +878,154 @@ class Jeux(commands.Cog):
             "ne sont pas liées à ton compte et seront conservées.",
             view=view,
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="historique", description="Parcourt les dernières offres connues du bot"
+    )
+    @app_commands.describe(
+        plateforme="Ne montrer que cette plateforme",
+        type="Ne montrer que ce type d'offre",
+    )
+    @app_commands.choices(
+        plateforme=[
+            app_commands.Choice(name=platforms.display_name(key), value=key)
+            for key in config.PLATFORM_KEYS
+        ],
+        type=[
+            app_commands.Choice(name=label, value=key)
+            for key, label in config.OFFER_TYPE_LABELS.items()
+        ],
+    )
+    async def historique(
+        self,
+        interaction: discord.Interaction,
+        plateforme: str | None = None,
+        type: str | None = None,
+    ):
+        """Historique des offres déjà vues par le bot, utile pour retrouver une ancienne annonce."""
+        games = await database.get_recent_giveaways(
+            limit=50, platform=platforms.display_name(plateforme) if plateforme else None, offer_type=type
+        )
+        if not games:
+            await interaction.response.send_message(
+                "Aucune offre connue pour ces filtres.", ephemeral=True
+            )
+            return
+
+        favorite_ids = await database.get_favorite_ids(interaction.user.id)
+        view = GameBrowserView(games, owner_id=interaction.user.id, favorite_ids=favorite_ids)
+        await interaction.response.send_message(embed=view.current_embed(), view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+    @app_commands.command(name="recherche", description="Recherche une offre par titre ou description")
+    @app_commands.describe(terme="Mot-clé à chercher")
+    async def recherche(self, interaction: discord.Interaction, terme: str):
+        games = await database.search_giveaways(terme, limit=20)
+        if not games:
+            await interaction.response.send_message(
+                f"Aucune offre trouvée pour « {terme} ».", ephemeral=True
+            )
+            return
+
+        favorite_ids = await database.get_favorite_ids(interaction.user.id)
+        view = GameBrowserView(games, owner_id=interaction.user.id, favorite_ids=favorite_ids)
+        await interaction.response.send_message(embed=view.current_embed(), view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+    @app_commands.command(
+        name="preferences", description="Personnalise les offres affichées et reçues en alerte"
+    )
+    @app_commands.describe(
+        types="Types d'offres séparés par une virgule (ex : game,dlc)",
+        prix_min="Ignore les offres valant moins que ce prix, en euros",
+        genres="Genres séparés par une virgule (ex : rpg,action)",
+        fuseau="Fuseau horaire IANA (ex : Europe/Paris), vide pour revenir au défaut",
+    )
+    async def preferences(
+        self,
+        interaction: discord.Interaction,
+        types: str | None = None,
+        prix_min: float | None = None,
+        genres: str | None = None,
+        fuseau: str | None = None,
+    ):
+        current = await database.get_user_preferences(interaction.user.id)
+        offer_types = (
+            [t.strip() for t in types.split(",") if t.strip() in config.OFFER_TYPE_KEYS]
+            if types is not None
+            else current["offer_types"]
+        )
+        new_genres = normalize_genres(genres.split(",")) if genres is not None else current["genres"]
+
+        await database.set_user_preferences(
+            interaction.user.id,
+            offer_types=offer_types or ["game"],
+            min_worth_eur=prix_min if prix_min is not None else current["min_worth_eur"],
+            genres=new_genres,
+            timezone=fuseau if fuseau is not None else current["timezone"],
+        )
+        saved = await database.get_user_preferences(interaction.user.id)
+        types_label = ", ".join(config.OFFER_TYPE_LABELS.get(t, t) for t in saved["offer_types"]) or "—"
+        genres_label = ", ".join(config.GENRE_LABELS.get(g, g) for g in saved["genres"]) or "tous"
+        await interaction.response.send_message(
+            "✅ Préférences enregistrées.\n"
+            f"Types : **{types_label}**\n"
+            f"Prix minimum : **{saved['min_worth_eur'] if saved['min_worth_eur'] is not None else '—'} €**\n"
+            f"Genres : **{genres_label}**\n"
+            f"Fuseau horaire : **{saved['timezone'] or config.DEFAULT_TIMEZONE} (défaut)**",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="alertes", description="Active ou désactive tes alertes personnelles par message privé"
+    )
+    @app_commands.describe(
+        type="L'alerte à modifier",
+        active="Activer (True) ou désactiver (False) cette alerte",
+    )
+    @app_commands.choices(
+        type=[
+            app_commands.Choice(name=label, value=key)
+            for key, label in {**config.USER_NOTIFICATION_EVENT_LABELS}.items()
+        ]
+    )
+    async def alertes(self, interaction: discord.Interaction, type: str, active: bool):
+        await database.set_user_notification(interaction.user.id, type, active)
+        label = config.USER_NOTIFICATION_EVENT_LABELS.get(type, type)
+        etat = "activée ✅" if active else "désactivée ⛔"
+        note = "" if active else "\n(Vérifie aussi que tes messages privés sont ouverts pour ce bot.)"
+        await interaction.response.send_message(f"Alerte **{label}** {etat}.{note}", ephemeral=True)
+
+    @app_commands.command(
+        name="rappel-salon",
+        description="Choisit le salon où envoyer les rappels « se termine aujourd'hui »",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    @app_commands.describe(salon="Salon qui recevra les rappels (par défaut : ce salon)")
+    async def rappel_salon(
+        self, interaction: discord.Interaction, salon: discord.TextChannel | None = None
+    ):
+        channel = salon or interaction.channel
+        await database.set_guild_reminder_channel(interaction.guild.id, channel.id)
+        await interaction.response.send_message(
+            f"Les rappels « se termine aujourd'hui » seront envoyés dans {channel.mention}.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="dev-stats", description="Statistiques internes du bot (réservé au développeur)"
+    )
+    async def dev_stats(self, interaction: discord.Interaction):
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Commande réservée au développeur du bot.", ephemeral=True
+            )
+            return
+        stats = await metrics.build_dev_stats(self.bot)
+        await interaction.response.send_message(
+            f"```\n{metrics.format_dev_stats_text(stats)}\n```", ephemeral=True
         )
 
     async def saved_access_roles(self, guild: discord.Guild) -> list:
