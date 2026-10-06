@@ -160,11 +160,11 @@ Le bot utilise SQLite (`DB_PATH`) et conserve :
 - pour les favoris, l'identifiant Discord du membre, l'identifiant de l'offre et la date d'ajout ;
 - pour les préférences et alertes personnelles (`/preferences`, `/alertes`), les réglages choisis, liés uniquement à l'identifiant Discord du membre ;
 - un historique minimal des alertes déjà envoyées (membre, offre, type d'alerte) pour éviter les doublons et respecter un délai minimal entre deux alertes identiques ;
-- si le tableau de bord web est activé, une session de connexion temporaire (identifiant Discord, pseudo, expiration) créée après une connexion OAuth2 réussie.
+- si le tableau de bord web est activé, une session de connexion temporaire (identifiant Discord, pseudo, expiration, jeton anti-CSRF et instantané des serveurs gérables — jamais le jeton OAuth Discord) créée après une connexion OAuth2 réussie.
 
 Le bot ne stocke pas les messages privés, les messages des membres ni la preuve qu'un jeu a été réclamé. Les réponses de `/free`, `/favoris`, `/historique` et `/recherche` sont éphémères. Les offres publiques non favorites sont supprimées du catalogue après 90 jours sans nouvelle observation ; celles gardées en favori restent jusqu'au retrait du favori ou à la suppression des données.
 
-Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confirme. Cette action ne supprime pas les réglages du serveur, les préférences/alertes personnelles, ni les informations publiques d'une offre qui serait encore en favori par quelqu'un d'autre.
+Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confirme. Cette action ne supprime pas les réglages du serveur, les préférences/alertes personnelles, ni les informations publiques d'une offre qui serait encore en favori par quelqu'un d'autre. Sur le tableau de bord web, la page « Compte » propose une suppression plus large : favoris, préférences, alertes, historique d'alertes et sessions web d'un coup.
 
 ---
 
@@ -197,11 +197,21 @@ Deux subtilités Discord sont gérées dans `utils/permissions.py` :
 ## Tableau de bord web
 
 Un petit serveur web optionnel (basé sur `aiohttp.web`, déjà dans les dépendances du bot — aucun
-paquet supplémentaire requis) expose des statistiques publiques et une connexion Discord :
+paquet supplémentaire requis) sert de **centre de configuration** de FreeGameDrop :
 
-- `GET /` : page d'accueil avec les statistiques globales (serveurs, offres suivies, favoris...) et
-  un bouton de connexion Discord (OAuth2, scope `identify` uniquement).
-- `GET /api/stats` : les mêmes statistiques en JSON.
+- `GET /` : page d'accueil publique avec les boutons « Ajouter à Discord » et « Se connecter avec
+  Discord » (OAuth2, scopes `identify guilds` uniquement), plus les statistiques globales.
+- `GET /offres` : la vitrine publique des jeux gratuits connus du bot, filtrable par plateforme.
+- `GET /serveurs` : après connexion, la liste des serveurs que le membre peut **réellement**
+  administrer (propriétaire, administrateur ou « Gérer le serveur »), avec l'état d'installation
+  du bot sur chacun.
+- `GET`/`POST /serveurs/{id}` : configuration d'un serveur — salons d'annonces et rôles par
+  plateforme, salon des rappels, et vérification des permissions du bot (avec un bouton
+  « Corriger » si une permission manque).
+- `GET`/`POST /alertes` : les alertes personnelles (DM) et les types d'offres suivis, les mêmes
+  réglages que `/alertes` et `/preferences` sur Discord.
+- `GET /compte`, `POST /compte/supprimer` : résumé des données conservées et suppression complète.
+- `GET /api/stats` : les statistiques globales en JSON.
 - `GET /login`, `GET /auth/callback`, `GET /logout` : parcours de connexion/déconnexion.
 
 Pour l'activer :
@@ -215,11 +225,20 @@ Pour l'activer :
 
 Le tableau de bord ne stocke aucune donnée de jeu séparée : il lit la même base SQLite que le bot.
 
-**Sécurité des sessions.** Le cookie de session (`HttpOnly`, `SameSite=Lax`) reçoit aussi
-l'attribut `Secure` dès que `DASHBOARD_BASE_URL` commence par `https://` — donc automatiquement en
-production normale, sans rien à faire. Si tu places un reverse proxy qui termine le TLS devant le
-bot (le serveur interne reste alors en HTTP), force quand même `DASHBOARD_COOKIE_SECURE=true`.
-Ne mets jamais `DASHBOARD_COOKIE_SECURE=false` sur un tableau de bord exposé publiquement.
+**Sécurité du tableau de bord.**
+
+- Le jeton OAuth Discord du membre n'est **jamais stocké** : il sert uniquement, au moment de la
+  connexion, à lire son identité et la liste de ses serveurs gérables (id, nom, icône) — cet
+  instantané est ensuite conservé dans la session, côté serveur.
+- Un serveur n'est configurable que si le membre peut le gérer **et** que le bot y est présent ;
+  chaque identifiant de salon ou de rôle envoyé par un formulaire est vérifié comme appartenant
+  bien à ce serveur.
+- Tous les formulaires sont protégés par un jeton anti-CSRF propre à la session.
+- Le cookie de session (`HttpOnly`, `SameSite=Lax`) reçoit aussi l'attribut `Secure` dès que
+  `DASHBOARD_BASE_URL` commence par `https://` — donc automatiquement en production normale, sans
+  rien à faire. Si tu places un reverse proxy qui termine le TLS devant le bot (le serveur interne
+  reste alors en HTTP), force quand même `DASHBOARD_COOKIE_SECURE=true`. Ne mets jamais
+  `DASHBOARD_COOKIE_SECURE=false` sur un tableau de bord exposé publiquement.
 
 ---
 

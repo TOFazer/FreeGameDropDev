@@ -1,5 +1,6 @@
 """Tableau de bord web : pages publiques et connexion Discord (OAuth2)."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -146,3 +147,310 @@ async def test_logout_supprime_la_session(client, db):
 
     assert resp.status == 302
     assert await db.get_dashboard_session("tok789") is None
+
+
+# ---------- Nouveau tableau de bord : serveurs, offres, alertes, compte ----------
+
+
+def _perms(**overrides):
+    """Permissions du bot sur un faux serveur : tout accordé sauf mention contraire."""
+    flags = {attr: True for attr, _label, _desc in dashboard.REQUIRED_BOT_PERMISSIONS}
+    flags.update(overrides)
+    return SimpleNamespace(**flags)
+
+
+class _FakeRole:
+    def __init__(self, role_id, name, default=False):
+        self.id = role_id
+        self.name = name
+        self._default = default
+
+    def is_default(self):
+        return self._default
+
+
+class _FakeChannel:
+    def __init__(self, channel_id, name):
+        self.id = channel_id
+        self.name = name
+
+
+class _FakeGuild:
+    def __init__(self, guild_id, name="Mon serveur", permissions=None):
+        self.id = guild_id
+        self.name = name
+        self.text_channels = [_FakeChannel(501, "général"), _FakeChannel(502, "jeux-steam")]
+        self.roles = [_FakeRole(1, "@everyone", default=True), _FakeRole(601, "Steam")]
+        self.me = SimpleNamespace(guild_permissions=permissions or _perms())
+
+
+class _FakeBot:
+    def __init__(self, *guilds):
+        self.guilds = list(guilds)
+        self.latency = 0.01
+
+    def get_guild(self, guild_id):
+        return next((g for g in self.guilds if g.id == guild_id), None)
+
+
+@pytest.fixture
+async def guild_client(db):
+    """Client dont le bot est présent sur le serveur 123 (et seulement lui)."""
+    bot = _FakeBot(_FakeGuild(123, "Serveur Gaming"))
+    app = dashboard_server.create_app(bot)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    yield client
+    await client.close()
+
+
+async def _login(db, client, guilds=None, user_id=42, csrf="csrf-test", session_id="tok-sess"):
+    await db.create_dashboard_session(
+        session_id,
+        user_id,
+        "Alice",
+        "",
+        dashboard.session_expiry(),
+        csrf_token=csrf,
+        guilds_json=json.dumps(guilds or []),
+    )
+    client.session.cookie_jar.update_cookies({dashboard.SESSION_COOKIE: session_id})
+
+
+def test_url_dautorisation_demande_le_scope_guilds(monkeypatch):
+    monkeypatch.setattr(config, "DISCORD_CLIENT_ID", "123")
+
+    url = dashboard.build_authorize_url("etat")
+
+    assert "scope=identify+guilds" in url
+
+
+def test_lien_dinvitation_utilise_les_permissions_du_readme(monkeypatch):
+    monkeypatch.setattr(config, "DISCORD_CLIENT_ID", "123")
+
+    url = dashboard.build_invite_url(guild_id=987)
+
+    assert "permissions=268528656" in url
+    assert "guild_id=987" in url
+    assert "scope=bot+applications.commands" in url
+
+
+def test_filtre_des_serveurs_gerables_par_permissions():
+    guilds = [
+        {"id": "1", "name": "Proprio", "owner": True, "permissions": "0"},
+        {"id": "2", "name": "Admin", "owner": False, "permissions": str(0x8)},
+        {"id": "3", "name": "Manager", "owner": False, "permissions": str(0x20)},
+        {"id": "4", "name": "Simple membre", "owner": False, "permissions": str(0x400)},
+    ]
+
+    manageable = dashboard.filter_manageable_guilds(guilds)
+
+    assert [g["id"] for g in manageable] == ["1", "2", "3"]
+
+
+async def test_serveurs_exige_une_connexion(guild_client):
+    resp = await guild_client.get("/serveurs", allow_redirects=False)
+
+    assert resp.status == 302
+    assert resp.headers["Location"] == "/login"
+
+
+async def test_serveurs_distingue_bot_present_ou_absent(guild_client, db, monkeypatch):
+    monkeypatch.setattr(config, "DISCORD_CLIENT_ID", "123")
+    await _login(
+        db,
+        guild_client,
+        guilds=[
+            {"id": "123", "name": "Serveur Gaming", "icon": ""},
+            {"id": "456", "name": "Serveur XYZ", "icon": ""},
+        ],
+    )
+
+    resp = await guild_client.get("/serveurs")
+
+    text = await resp.text()
+    assert resp.status == 200
+    assert "Serveur Gaming" in text and "Configurer" in text
+    assert "Serveur XYZ" in text and "Ajouter FreeGameDrop" in text
+
+
+async def test_config_refusee_pour_un_serveur_non_gerable(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "456", "name": "Autre", "icon": ""}])
+
+    resp = await guild_client.get("/serveurs/123")
+
+    assert resp.status == 404
+
+
+async def test_config_refusee_si_le_bot_est_absent(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "456", "name": "Sans bot", "icon": ""}])
+
+    resp = await guild_client.get("/serveurs/456")
+
+    assert resp.status == 404
+    assert "pas (ou plus) présent" in await resp.text()
+
+
+async def test_config_affiche_salons_roles_et_permissions(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "123", "name": "Serveur Gaming", "icon": ""}])
+    await db.set_platform_channel(123, "steam", 502)
+
+    resp = await guild_client.get("/serveurs/123")
+
+    text = await resp.text()
+    assert resp.status == 200
+    assert "jeux-steam" in text  # salon proposé dans les listes
+    assert "Gérer les rôles" in text  # tableau des permissions
+    assert "Permissions manquantes" not in text  # tout est accordé dans ce faux serveur
+
+
+async def test_config_signale_une_permission_manquante(db):
+    bot = _FakeBot(_FakeGuild(123, permissions=_perms(manage_roles=False)))
+    app = dashboard_server.create_app(bot)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        await _login(db, client, guilds=[{"id": "123", "name": "Serveur", "icon": ""}])
+
+        resp = await client.get("/serveurs/123")
+
+        text = await resp.text()
+        assert "⚠️" in text
+        assert "Permissions manquantes : Gérer les rôles" in text
+        assert "Corriger" in text
+    finally:
+        await client.close()
+
+
+async def test_config_enregistre_salon_et_role(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "123", "name": "Serveur Gaming", "icon": ""}])
+
+    resp = await guild_client.post(
+        "/serveurs/123",
+        data={"csrf": "csrf-test", "channel_steam": "502", "role_steam": "601",
+              "reminder_channel": "501"},
+        allow_redirects=False,
+    )
+
+    assert resp.status == 302
+    assert (await db.get_platform_channels(123)) == {"steam": 502}
+    assert (await db.get_guild_platform_roles(123)) == {"steam": 601}
+    assert (await db.get_guild_reminder_channel(123)) == 501
+
+
+async def test_config_rejette_un_salon_etranger_au_serveur(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "123", "name": "Serveur Gaming", "icon": ""}])
+
+    resp = await guild_client.post(
+        "/serveurs/123",
+        data={"csrf": "csrf-test", "channel_steam": "99999", "role_steam": "1"},
+        allow_redirects=False,
+    )
+
+    assert resp.status == 302  # la page revient, mais rien n'est écrit
+    assert (await db.get_platform_channels(123)) == {}
+    assert (await db.get_guild_platform_roles(123)) == {}
+
+
+async def test_post_sans_jeton_csrf_est_refuse(guild_client, db):
+    await _login(db, guild_client, guilds=[{"id": "123", "name": "Serveur Gaming", "icon": ""}])
+
+    resp = await guild_client.post(
+        "/serveurs/123", data={"channel_steam": "502"}, allow_redirects=False
+    )
+
+    assert resp.status == 403
+    assert (await db.get_platform_channels(123)) == {}
+
+
+async def test_offres_est_publique_et_filtrable(client, db):
+    await db.save_giveaways(
+        [
+            {"id": 1, "title": "Jeu Steam", "platforms": "Steam", "worth": "9.99€",
+             "open_giveaway_url": "https://store.steampowered.com/jeu"},
+            {"id": 2, "title": "Jeu Epic", "platforms": "Epic Games Store"},
+        ]
+    )
+
+    resp = await client.get("/offres")
+    text = await resp.text()
+    assert resp.status == 200
+    assert "Jeu Steam" in text and "Jeu Epic" in text
+    assert "GRATUIT" in text
+    assert "Récupérer" in text  # bouton construit depuis open_giveaway_url
+
+    resp = await client.get("/offres", params={"plateforme": "steam"})
+    text = await resp.text()
+    assert "Jeu Steam" in text
+    assert "Jeu Epic" not in text
+
+
+async def test_alertes_exige_une_connexion(client):
+    resp = await client.get("/alertes", allow_redirects=False)
+
+    assert resp.status == 302
+    assert resp.headers["Location"] == "/login"
+
+
+async def test_alertes_enregistre_evenements_et_types(client, db):
+    await _login(db, client)
+
+    resp = await client.post(
+        "/alertes",
+        data={"csrf": "csrf-test", "event_new_offer": "on", "type_game": "on", "type_dlc": "on"},
+        allow_redirects=False,
+    )
+
+    assert resp.status == 302
+    notifications = await db.get_user_notifications(42)
+    assert notifications.get("new_offer") is True
+    assert notifications.get("ending_soon") is False
+    preferences = await db.get_user_preferences(42)
+    assert preferences["offer_types"] == ["game", "dlc"]
+
+
+async def test_alertes_conserve_les_autres_preferences(client, db):
+    await _login(db, client)
+    await db.set_user_preferences(42, offer_types=["game"], min_worth_eur=5.0,
+                                  genres=["rpg"], timezone="Europe/Paris")
+
+    await client.post(
+        "/alertes", data={"csrf": "csrf-test", "type_content": "on"}, allow_redirects=False
+    )
+
+    preferences = await db.get_user_preferences(42)
+    assert preferences["offer_types"] == ["content"]
+    assert preferences["min_worth_eur"] == 5.0
+    assert preferences["genres"] == ["rpg"]
+    assert preferences["timezone"] == "Europe/Paris"
+
+
+async def test_compte_affiche_le_resume_sans_id_complet(client, db):
+    await _login(db, client, user_id=123456789012345678)
+    await db.save_giveaways([{"id": 1, "title": "Jeu"}])
+    await db.toggle_favorite(123456789012345678, "1")
+
+    resp = await client.get("/compte")
+
+    text = await resp.text()
+    assert resp.status == 200
+    assert "Alice" in text
+    assert "123456789012345678" not in text  # l'ID complet n'est jamais affiché
+    assert "Favoris" in text
+
+
+async def test_suppression_du_compte_efface_tout_et_deconnecte(client, db):
+    await _login(db, client)
+    await db.save_giveaways([{"id": 1, "title": "Jeu"}])
+    await db.toggle_favorite(42, "1")
+    await db.set_user_notification(42, "new_offer", True)
+
+    resp = await client.post(
+        "/compte/supprimer", data={"csrf": "csrf-test"}, allow_redirects=False
+    )
+
+    assert resp.status == 302
+    assert await db.get_favorite_ids(42) == set()
+    assert not (await db.get_user_notifications(42)).get("new_offer")
+    assert await db.get_dashboard_session("tok-sess") is None
