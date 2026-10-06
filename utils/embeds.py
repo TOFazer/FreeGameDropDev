@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 
 import discord
 
+import config
 from utils import platforms
+
+SOURCE_LABELS = {
+    "gamerpower": "GamerPower",
+    "epic": "Epic Games Store",
+}
 
 
 def format_end_date(raw: str) -> str:
@@ -32,6 +38,10 @@ def clean_description(text: str, limit: int = 220) -> str:
     return text[:limit].rsplit(" ", 1)[0] + "…"
 
 
+def source_label(game: dict) -> str:
+    return SOURCE_LABELS.get(game.get("source"), "GamerPower")
+
+
 def build_game_message(game: dict):
     """(embed, view) d'annonce d'un jeu gratuit."""
     key = platforms.detect_platform(game)
@@ -49,9 +59,16 @@ def build_game_message(game: dict):
     embed.add_field(name="💰 Prix", value=format_price(game.get("worth")), inline=True)
     embed.add_field(name="⏳ Fin de l'offre", value=format_end_date(game.get("end_date")), inline=True)
     embed.add_field(name="🖥️ Plateformes", value=game.get("platforms") or "N/A", inline=False)
+
+    offer_type = game.get("offer_type")
+    if offer_type in {"dlc", "content"}:
+        embed.add_field(
+            name="🏷️ Type", value=config.OFFER_TYPE_LABELS.get(offer_type, offer_type), inline=True
+        )
+
     if game.get("thumbnail"):
         embed.set_image(url=game["thumbnail"])
-    embed.set_footer(text="Source : GamerPower")
+    embed.set_footer(text=f"Source : {source_label(game)}")
 
     view = discord.ui.View()
     if url:

@@ -3,6 +3,7 @@
 import aiosqlite
 
 import config
+from utils.offers import classify_offer_type, normalize_genres
 
 # Surchargeable via DB_PATH dans .env (et remplacé par un fichier temporaire dans les tests).
 DB_PATH = config.DB_PATH
@@ -82,10 +83,66 @@ async def init_db():
                 PRIMARY KEY (user_id, item_id)
             )"""
         )
+        # Préférences personnelles utilisées par /free, les favoris et les alertes DM.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id INTEGER PRIMARY KEY,
+                offer_types TEXT NOT NULL DEFAULT 'game',
+                min_worth_eur REAL,
+                genres TEXT NOT NULL DEFAULT '',
+                timezone TEXT NOT NULL DEFAULT ''
+            )"""
+        )
+        # Alertes personnelles (DM) qu'un membre a activées, indépendamment du serveur.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS user_notification_settings (
+                user_id INTEGER NOT NULL,
+                event TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (user_id, event)
+            )"""
+        )
+        # Historique d'envoi des alertes pour éviter les doublons et respecter la cadence.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS alert_history (
+                user_id INTEGER NOT NULL,
+                item_id TEXT NOT NULL,
+                event TEXT NOT NULL,
+                sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, item_id, event)
+            )"""
+        )
+        # Salon d'un serveur recevant les rappels « se termine aujourd'hui ».
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS guild_reminder_channels (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER NOT NULL
+            )"""
+        )
+        # Sessions du tableau de bord web, créées après l'authentification Discord OAuth2.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS dashboard_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                avatar TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TEXT NOT NULL
+            )"""
+        )
         try:
             await db.execute("ALTER TABLE guilds ADD COLUMN platforms TEXT")
         except aiosqlite.OperationalError:
             pass  # la colonne existe déjà
+        for column, definition in (
+            ("source", "TEXT NOT NULL DEFAULT 'gamerpower'"),
+            ("offer_type", "TEXT NOT NULL DEFAULT 'game'"),
+            ("genres", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            try:
+                await db.execute(f"ALTER TABLE giveaway_items ADD COLUMN {column} {definition}")
+            except aiosqlite.OperationalError:
+                pass  # la colonne existe déjà
         await db.commit()
 
 
@@ -268,6 +325,9 @@ async def save_giveaways(games):
         if not item_id:
             continue
 
+        genres_text = ",".join(normalize_genres(game.get("genres")))
+        offer_type = classify_offer_type(game.get("offer_type") or game.get("type"))
+
         rows.append(
             (
                 item_id,
@@ -280,6 +340,9 @@ async def save_giveaways(games):
                 _giveaway_field(game, "gamerpower_url", limit=2048),
                 _giveaway_field(game, "thumbnail", limit=2048),
                 _giveaway_field(game, "published_date", limit=64),
+                _giveaway_field(game, "source", "gamerpower", limit=32) or "gamerpower",
+                offer_type,
+                genres_text[:500],
             )
         )
 
@@ -290,8 +353,9 @@ async def save_giveaways(games):
         await db.executemany(
             """INSERT INTO giveaway_items (
                    item_id, title, description, platforms, worth, end_date,
-                   claim_url, source_url, thumbnail, published_date
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   claim_url, source_url, thumbnail, published_date,
+                   source, offer_type, genres
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(item_id) DO UPDATE SET
                    title = excluded.title,
                    description = CASE WHEN excluded.description != ''
@@ -310,6 +374,10 @@ async def save_giveaways(games):
                        THEN excluded.thumbnail ELSE giveaway_items.thumbnail END,
                    published_date = CASE WHEN excluded.published_date != ''
                        THEN excluded.published_date ELSE giveaway_items.published_date END,
+                   source = excluded.source,
+                   offer_type = excluded.offer_type,
+                   genres = CASE WHEN excluded.genres != ''
+                       THEN excluded.genres ELSE giveaway_items.genres END,
                    last_seen_at = CURRENT_TIMESTAMP""",
             rows,
         )
@@ -398,3 +466,304 @@ async def clear_user_favorites(user_id: int) -> int:
         cursor = await db.execute("DELETE FROM user_favorites WHERE user_id = ?", (user_id,))
         await db.commit()
         return cursor.rowcount
+
+
+def _row_to_giveaway(row) -> dict:
+    return {
+        "id": row[0],
+        "title": row[1],
+        "description": row[2],
+        "platforms": row[3],
+        "worth": row[4],
+        "end_date": row[5],
+        "open_giveaway_url": row[6],
+        "gamerpower_url": row[7],
+        "thumbnail": row[8],
+        "published_date": row[9],
+        "source": row[10],
+        "offer_type": row[11],
+        "genres": [g for g in (row[12] or "").split(",") if g],
+        "first_seen_at": row[13],
+    }
+
+
+_GIVEAWAY_COLUMNS = (
+    "item_id, title, description, platforms, worth, end_date, claim_url, "
+    "source_url, thumbnail, published_date, source, offer_type, genres, first_seen_at"
+)
+
+
+async def get_recent_giveaways(
+    limit: int = 50,
+    *,
+    platform: str | None = None,
+    offer_type: str | None = None,
+    source: str | None = None,
+) -> list[dict]:
+    """Historique des offres connues, de la plus récente à la plus ancienne."""
+    clauses = []
+    params: list = []
+    if platform:
+        clauses.append("platforms LIKE ?")
+        params.append(f"%{platform}%")
+    if offer_type:
+        clauses.append("offer_type = ?")
+        params.append(offer_type)
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"""SELECT {_GIVEAWAY_COLUMNS} FROM giveaway_items
+                {where}
+                ORDER BY first_seen_at DESC, rowid DESC
+                LIMIT ?""",
+            params,
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [_row_to_giveaway(row) for row in rows]
+
+
+async def search_giveaways(query: str, limit: int = 20) -> list[dict]:
+    """Recherche plein texte (titre puis description) parmi les offres connues."""
+    needle = f"%{query.strip()}%"
+    if query.strip() == "":
+        return []
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"""SELECT {_GIVEAWAY_COLUMNS} FROM giveaway_items
+                WHERE title LIKE ? OR description LIKE ?
+                ORDER BY first_seen_at DESC, rowid DESC
+                LIMIT ?""",
+            (needle, needle, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [_row_to_giveaway(row) for row in rows]
+
+
+async def get_giveaway_stats() -> dict:
+    """Statistiques globales du catalogue, utilisées par le tableau de bord développeur."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM giveaway_items") as cursor:
+            (total,) = await cursor.fetchone()
+
+        async with db.execute(
+            "SELECT source, COUNT(*) FROM giveaway_items GROUP BY source"
+        ) as cursor:
+            by_source = {source: count for source, count in await cursor.fetchall()}
+
+        async with db.execute(
+            "SELECT offer_type, COUNT(*) FROM giveaway_items GROUP BY offer_type"
+        ) as cursor:
+            by_type = {offer_type: count for offer_type, count in await cursor.fetchall()}
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM giveaway_items WHERE first_seen_at >= datetime('now', '-30 days')"
+        ) as cursor:
+            (last_30_days,) = await cursor.fetchone()
+
+        async with db.execute("SELECT COUNT(*) FROM user_favorites") as cursor:
+            (total_favorites,) = await cursor.fetchone()
+
+        async with db.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM user_favorites"
+        ) as cursor:
+            (members_with_favorites,) = await cursor.fetchone()
+
+        async with db.execute("SELECT COUNT(*) FROM guilds") as cursor:
+            (known_guilds,) = await cursor.fetchone()
+        async with db.execute(
+            "SELECT COUNT(DISTINCT guild_id) FROM platform_channels"
+        ) as cursor:
+            (configured_guilds,) = await cursor.fetchone()
+
+    return {
+        "total_offers": total,
+        "offers_by_source": by_source,
+        "offers_by_type": by_type,
+        "offers_last_30_days": last_30_days,
+        "total_favorites": total_favorites,
+        "members_with_favorites": members_with_favorites,
+        "known_guilds": known_guilds,
+        "configured_guilds": configured_guilds,
+    }
+
+
+# ---------- Préférences personnelles ----------
+
+
+async def set_user_preferences(
+    user_id: int,
+    *,
+    offer_types: list[str] | None = None,
+    min_worth_eur: float | None = None,
+    genres: list[str] | None = None,
+    timezone: str | None = None,
+) -> None:
+    offer_types_text = ",".join(offer_types) if offer_types else "game"
+    genres_text = ",".join(genres) if genres else ""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO user_preferences (user_id, offer_types, min_worth_eur, genres, timezone)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                   offer_types = excluded.offer_types,
+                   min_worth_eur = excluded.min_worth_eur,
+                   genres = excluded.genres,
+                   timezone = excluded.timezone""",
+            (user_id, offer_types_text, min_worth_eur, genres_text, timezone or ""),
+        )
+        await db.commit()
+
+
+async def get_user_preferences(user_id: int) -> dict:
+    """Préférences d'un membre, avec des valeurs par défaut sûres si aucune n'est enregistrée."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT offer_types, min_worth_eur, genres, timezone FROM user_preferences WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if row is None:
+        return {"offer_types": ["game"], "min_worth_eur": None, "genres": [], "timezone": ""}
+
+    offer_types, min_worth_eur, genres, timezone = row
+    return {
+        "offer_types": [t for t in (offer_types or "game").split(",") if t],
+        "min_worth_eur": min_worth_eur,
+        "genres": [g for g in (genres or "").split(",") if g],
+        "timezone": timezone or "",
+    }
+
+
+# ---------- Alertes personnelles (DM) ----------
+
+
+async def set_user_notification(user_id: int, event: str, enabled: bool) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO user_notification_settings (user_id, event, enabled) VALUES (?, ?, ?)
+               ON CONFLICT(user_id, event) DO UPDATE SET enabled = excluded.enabled""",
+            (user_id, event, int(enabled)),
+        )
+        await db.commit()
+
+
+async def get_user_notifications(user_id: int) -> dict[str, bool]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT event, enabled FROM user_notification_settings WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            return {event: bool(enabled) for event, enabled in await cursor.fetchall()}
+
+
+async def get_users_subscribed(event: str) -> list[int]:
+    """Membres ayant activé une alerte DM donnée."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id FROM user_notification_settings WHERE event = ? AND enabled = 1",
+            (event,),
+        ) as cursor:
+            return [row[0] for row in await cursor.fetchall()]
+
+
+async def was_alert_sent_recently(user_id: int, item_id: str, event: str, within_hours: float) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT 1 FROM alert_history
+               WHERE user_id = ? AND item_id = ? AND event = ?
+                 AND sent_at >= datetime('now', ?)""",
+            (user_id, str(item_id), event, f"-{within_hours} hours"),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def record_alert_sent(user_id: int, item_id: str, event: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO alert_history (user_id, item_id, event, sent_at)
+               VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(user_id, item_id, event) DO UPDATE SET sent_at = CURRENT_TIMESTAMP""",
+            (user_id, str(item_id), event),
+        )
+        await db.commit()
+
+
+# ---------- Rappels serveur ----------
+
+
+async def set_guild_reminder_channel(guild_id: int, channel_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO guild_reminder_channels (guild_id, channel_id) VALUES (?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id""",
+            (guild_id, channel_id),
+        )
+        await db.commit()
+
+
+async def get_guild_reminder_channel(guild_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT channel_id FROM guild_reminder_channels WHERE guild_id = ?", (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def get_all_guild_reminder_channels() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT guild_id, channel_id FROM guild_reminder_channels") as cursor:
+            return {g: c for g, c in await cursor.fetchall()}
+
+
+# ---------- Sessions du tableau de bord web ----------
+
+
+async def create_dashboard_session(
+    session_id: str, user_id: int, username: str, avatar: str, expires_at: str
+) -> None:
+    """`expires_at` doit être au format SQLite ``YYYY-MM-DD HH:MM:SS`` (UTC), comparable
+    directement à ``CURRENT_TIMESTAMP``."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO dashboard_sessions (session_id, user_id, username, avatar, expires_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET
+                   user_id = excluded.user_id,
+                   username = excluded.username,
+                   avatar = excluded.avatar,
+                   expires_at = excluded.expires_at""",
+            (session_id, user_id, username, avatar, expires_at),
+        )
+        await db.commit()
+
+
+async def get_dashboard_session(session_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT user_id, username, avatar, expires_at FROM dashboard_sessions
+               WHERE session_id = ? AND expires_at > CURRENT_TIMESTAMP""",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {"user_id": row[0], "username": row[1], "avatar": row[2], "expires_at": row[3]}
+
+
+async def delete_dashboard_session(session_id: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM dashboard_sessions WHERE session_id = ?", (session_id,))
+        await db.commit()
+
+
+async def purge_expired_sessions() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM dashboard_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
+        await db.commit()

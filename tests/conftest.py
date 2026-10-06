@@ -12,6 +12,23 @@ import pytest
 
 import database
 from cogs.jeux import Jeux
+from services import epic_games
+
+
+@pytest.fixture(autouse=True)
+def _no_real_epic_calls(request, monkeypatch):
+    """Aucun test ne doit déclencher un vrai appel réseau vers l'Epic Games Store.
+
+    `tests/test_epic_games.py` teste `fetch_giveaways` lui-même et gère déjà
+    ses propres doubles de test : il est exclu de ce garde-fou.
+    """
+    if "test_epic_games" in request.node.nodeid:
+        return
+
+    async def _empty():
+        return []
+
+    monkeypatch.setattr(epic_games, "fetch_giveaways", _empty)
 
 
 class FakeRole:
