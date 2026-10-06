@@ -6,6 +6,7 @@ Ce cog ne contient que la logique Discord : les messages sont construits dans
 """
 
 import logging
+import math
 
 import discord
 from discord import app_commands
@@ -212,6 +213,175 @@ class AccessView(ConfigView):
         await interaction.response.edit_message(content="⏳ Mise à jour des permissions…", view=None)
         report = await self.cog.apply_access(interaction.guild, self.access_roles)
         await self.finish(interaction, report)
+
+
+class GamePageButton(discord.ui.Button):
+    """Bouton précédent/suivant du navigateur d'offres."""
+
+    def __init__(self, browser: "GameBrowserView", direction: int, label: str):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=1)
+        self.browser = browser
+        self.direction = direction
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.browser.change_page(interaction, self.direction)
+
+
+class FavoriteToggleButton(discord.ui.Button):
+    """Ajoute ou retire l'offre affichée des favoris du membre qui a lancé la commande."""
+
+    def __init__(self, browser: "GameBrowserView"):
+        super().__init__(style=discord.ButtonStyle.secondary, row=0)
+        self.browser = browser
+        self.sync_label()
+
+    def sync_label(self):
+        game_id = str(self.browser.current_game.get("id"))
+        saved = game_id in self.browser.favorite_ids
+        self.label = "Retirer des favoris" if saved else "Ajouter aux favoris"
+        self.emoji = "💔" if saved else "❤️"
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.browser.toggle_favorite(interaction)
+
+
+class GameBrowserView(discord.ui.View):
+    """Pagination éphémère des offres avec un bouton de favoris par membre."""
+
+    def __init__(
+        self,
+        games: list[dict],
+        owner_id: int,
+        favorite_ids=(),
+        *,
+        showing_favorites: bool = False,
+        timeout: float = 180,
+    ):
+        super().__init__(timeout=timeout)
+        self.games = list(games)
+        if not self.games:
+            raise ValueError("GameBrowserView requires at least one game")
+        self.owner_id = owner_id
+        self.favorite_ids = {str(item_id) for item_id in favorite_ids}
+        self.showing_favorites = showing_favorites
+        self.page = 0
+        self.message = None
+        self.claim_button = None
+        self.favorite_button = FavoriteToggleButton(self)
+        self.previous_button = GamePageButton(self, -1, "Précédent")
+        self.next_button = GamePageButton(self, 1, "Suivant")
+        self.add_item(self.favorite_button)
+        self.add_item(self.previous_button)
+        self.add_item(self.next_button)
+        self._sync_components()
+
+    @property
+    def current_game(self) -> dict:
+        return self.games[self.page]
+
+    @property
+    def page_count(self) -> int:
+        return len(self.games)
+
+    def current_embed(self) -> discord.Embed:
+        embed, _ = build_game_message(self.current_game)
+        embed.set_footer(text=f"Source : GamerPower • {self.page + 1}/{self.page_count}")
+        return embed
+
+    def _sync_components(self):
+        self.previous_button.disabled = self.page == 0
+        self.next_button.disabled = self.page >= self.page_count - 1
+        self.favorite_button.sync_label()
+
+        if self.claim_button is not None:
+            self.remove_item(self.claim_button)
+            self.claim_button = None
+
+        url = self.current_game.get("open_giveaway_url") or self.current_game.get("gamerpower_url")
+        if url:
+            self.claim_button = discord.ui.Button(
+                style=discord.ButtonStyle.link,
+                label="Récupérer le jeu",
+                emoji="🎁",
+                url=url,
+                row=0,
+            )
+            self.add_item(self.claim_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "Seule la personne qui a lancé la commande peut parcourir cette liste.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def change_page(self, interaction: discord.Interaction, direction: int):
+        self.page = min(max(self.page + direction, 0), self.page_count - 1)
+        self._sync_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def toggle_favorite(self, interaction: discord.Interaction):
+        game_id = str(self.current_game.get("id"))
+        is_saved = await database.toggle_favorite(self.owner_id, game_id)
+        if is_saved:
+            self.favorite_ids.add(game_id)
+        else:
+            self.favorite_ids.discard(game_id)
+            if self.showing_favorites:
+                self.games.pop(self.page)
+                if not self.games:
+                    self.stop()
+                    await interaction.response.edit_message(
+                        content="Tu n'as plus aucun favori enregistré.", embed=None, view=None
+                    )
+                    return
+                self.page = min(self.page, self.page_count - 1)
+
+        self._sync_components()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def on_timeout(self):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button) and item.style is not discord.ButtonStyle.link:
+                item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
+class ConfirmDeleteDataView(discord.ui.View):
+    """Confirmation avant d'effacer les favoris associés à un compte Discord."""
+
+    def __init__(self, owner_id: int, timeout: float = 60):
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "Seule la personne qui a lancé la commande peut confirmer cette suppression.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Supprimer mes favoris", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        count = await database.clear_user_favorites(self.owner_id)
+        await interaction.response.edit_message(
+            content=f"Suppression terminée : **{count}** favori(s) effacé(s).",
+            view=None,
+        )
+        self.stop()
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Annulé, aucune donnée n'a été supprimée.", view=None)
+        self.stop()
 
 
 class ConfirmReset(discord.ui.View):
@@ -523,7 +693,9 @@ class Jeux(commands.Cog):
 
     async def run_check(self) -> int:
         """Envoie les jeux gratuits pas encore annoncés. Retourne le nombre d'annonces."""
-        games = await gamerpower.fetch_giveaways()
+        response = await gamerpower.fetch_giveaways()
+        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        await database.save_giveaways(games)
         routes = await database.get_routes()
         roles = await database.get_all_platform_roles()
         mentions = discord.AllowedMentions(roles=True)
@@ -568,22 +740,107 @@ class Jeux(commands.Cog):
 
     # ----- commandes -----
 
+    @app_commands.command(name="free", description="Parcourt les offres de jeux gratuits du moment")
+    @app_commands.checks.cooldown(1, 15.0, key=lambda interaction: interaction.user.id)
+    async def free(self, interaction: discord.Interaction):
+        """Liste les offres actuelles en privé et permet de les ajouter aux favoris."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            response = await gamerpower.fetch_giveaways()
+        except Exception:
+            log.exception("Impossible de récupérer les offres pour /free")
+            await interaction.followup.send(
+                "Impossible de récupérer les offres pour le moment. Réessaie un peu plus tard.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(response, list):
+            response = []
+        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        if not games:
+            await interaction.followup.send(
+                "Aucun jeu gratuit trouvé pour le moment, ou la source est temporairement indisponible.",
+                ephemeral=True,
+            )
+            return
+
+        await database.save_giveaways(games)
+        view = GameBrowserView(
+            games,
+            owner_id=interaction.user.id,
+            favorite_ids=await database.get_favorite_ids(interaction.user.id),
+        )
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view, ephemeral=True, wait=True
+        )
+
+    @free.error
+    async def free_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            retry_after = max(1, math.ceil(error.retry_after))
+            message = f"Attends encore {retry_after} seconde(s) avant de relancer `/free`."
+        else:
+            log.error("Erreur pendant la commande /free : %s", error)
+            message = "La commande `/free` a rencontré une erreur. Réessaie un peu plus tard."
+
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
+    @app_commands.command(name="favoris", description="Consulte et gère tes jeux favoris")
+    async def favoris(self, interaction: discord.Interaction):
+        """Affiche la liste privée des favoris du compte Discord."""
+        try:
+            games = await database.get_favorites(interaction.user.id)
+        except Exception:
+            log.exception("Impossible de lire les favoris pour /favoris")
+            await interaction.response.send_message(
+                "Impossible de lire tes favoris pour le moment. Réessaie plus tard.", ephemeral=True
+            )
+            return
+
+        if not games:
+            await interaction.response.send_message(
+                "Tu n'as pas encore de favori. Lance `/free`, puis clique sur ❤️.", ephemeral=True
+            )
+            return
+
+        view = GameBrowserView(
+            games,
+            owner_id=interaction.user.id,
+            favorite_ids={str(game["id"]) for game in games},
+            showing_favorites=True,
+        )
+        await interaction.response.send_message(
+            embed=view.current_embed(), view=view, ephemeral=True
+        )
+        view.message = await interaction.original_response()
+
+    @app_commands.command(
+        name="mes-donnees", description="Supprime les favoris associés à ton compte Discord"
+    )
+    async def mes_donnees(self, interaction: discord.Interaction):
+        """Permet à un membre d'effacer ses données de favoris."""
+        view = ConfirmDeleteDataView(interaction.user.id)
+        await interaction.response.send_message(
+            "Cette action supprimera tes favoris. Les informations publiques sur les offres "
+            "ne sont pas liées à ton compte et seront conservées.",
+            view=view,
+            ephemeral=True,
+        )
+
     async def saved_access_roles(self, guild: discord.Guild) -> list:
         saved = await database.get_roles_channel_access(guild.id)
         return clean_access_roles(guild, [guild.get_role(role_id) for role_id in saved])
 
-    @app_commands.command(
-        name="setup-auto",
-        description="Crée les salons privés, les rôles et le salon de choix des rôles",
-    )
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.guild_only()
-    async def setup_auto(self, interaction: discord.Interaction):
+    async def show_config_panel(self, interaction: discord.Interaction):
         guild = interaction.guild
         known = await database.get_platform_channels(guild.id)
         view = SetupView(
             self,
-            [k for k in config.PLATFORM_KEYS if k in known],
+            [key for key in config.PLATFORM_KEYS if key in known],
             await self.saved_access_roles(guild),
         )
         await interaction.response.send_message(
@@ -592,6 +849,21 @@ class Jeux(commands.Cog):
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    @app_commands.command(
+        name="setup-auto",
+        description="Crée les salons privés, les rôles et le salon de choix des rôles",
+    )
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def setup_auto(self, interaction: discord.Interaction):
+        await self.show_config_panel(interaction)
+
+    @app_commands.command(name="config", description="Ouvre le panneau de configuration du serveur")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def config_panel(self, interaction: discord.Interaction):
+        await self.show_config_panel(interaction)
 
     @app_commands.command(
         name="acces-salon-roles",

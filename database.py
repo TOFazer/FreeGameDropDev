@@ -55,6 +55,33 @@ async def init_db():
                 PRIMARY KEY (guild_id, role_id)
             )"""
         )
+        # Catalogue minimal d'offres publiques : uniquement les champs nécessaires
+        # à l'affichage des favoris et aux futures fonctions d'historique/recherche.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS giveaway_items (
+                item_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                platforms TEXT NOT NULL DEFAULT '',
+                worth TEXT NOT NULL DEFAULT '',
+                end_date TEXT NOT NULL DEFAULT '',
+                claim_url TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                thumbnail TEXT NOT NULL DEFAULT '',
+                published_date TEXT NOT NULL DEFAULT '',
+                first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        # On ne conserve côté utilisateur que son ID Discord et les offres favorites.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS user_favorites (
+                user_id INTEGER NOT NULL,
+                item_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, item_id)
+            )"""
+        )
         try:
             await db.execute("ALTER TABLE guilds ADD COLUMN platforms TEXT")
         except aiosqlite.OperationalError:
@@ -224,3 +251,150 @@ async def clear_guild(guild_id: int):
         ):
             await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
         await db.commit()
+
+
+def _giveaway_field(game: dict, name: str, fallback: str = "", limit: int = 2048) -> str:
+    value = game.get(name) or fallback
+    return str(value).strip()[:limit]
+
+
+async def save_giveaways(games):
+    """Enregistre les champs publics utiles d'une liste d'offres GamerPower."""
+    rows = []
+    for game in games or []:
+        if not isinstance(game, dict) or game.get("id") is None:
+            continue
+        item_id = str(game["id"]).strip()[:128]
+        if not item_id:
+            continue
+
+        rows.append(
+            (
+                item_id,
+                _giveaway_field(game, "title", "Jeu gratuit", 256) or "Jeu gratuit",
+                _giveaway_field(game, "description", limit=4096),
+                _giveaway_field(game, "platforms", limit=1000),
+                _giveaway_field(game, "worth", limit=100),
+                _giveaway_field(game, "end_date", limit=64),
+                _giveaway_field(game, "open_giveaway_url", limit=2048),
+                _giveaway_field(game, "gamerpower_url", limit=2048),
+                _giveaway_field(game, "thumbnail", limit=2048),
+                _giveaway_field(game, "published_date", limit=64),
+            )
+        )
+
+    if not rows:
+        return
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executemany(
+            """INSERT INTO giveaway_items (
+                   item_id, title, description, platforms, worth, end_date,
+                   claim_url, source_url, thumbnail, published_date
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(item_id) DO UPDATE SET
+                   title = excluded.title,
+                   description = CASE WHEN excluded.description != ''
+                       THEN excluded.description ELSE giveaway_items.description END,
+                   platforms = CASE WHEN excluded.platforms != ''
+                       THEN excluded.platforms ELSE giveaway_items.platforms END,
+                   worth = CASE WHEN excluded.worth != ''
+                       THEN excluded.worth ELSE giveaway_items.worth END,
+                   end_date = CASE WHEN excluded.end_date != ''
+                       THEN excluded.end_date ELSE giveaway_items.end_date END,
+                   claim_url = CASE WHEN excluded.claim_url != ''
+                       THEN excluded.claim_url ELSE giveaway_items.claim_url END,
+                   source_url = CASE WHEN excluded.source_url != ''
+                       THEN excluded.source_url ELSE giveaway_items.source_url END,
+                   thumbnail = CASE WHEN excluded.thumbnail != ''
+                       THEN excluded.thumbnail ELSE giveaway_items.thumbnail END,
+                   published_date = CASE WHEN excluded.published_date != ''
+                       THEN excluded.published_date ELSE giveaway_items.published_date END,
+                   last_seen_at = CURRENT_TIMESTAMP""",
+            rows,
+        )
+        await db.execute(
+            """DELETE FROM giveaway_items
+               WHERE last_seen_at < datetime('now', '-90 days')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM user_favorites
+                     WHERE user_favorites.item_id = giveaway_items.item_id
+                 )"""
+        )
+        await db.commit()
+
+
+async def toggle_favorite(user_id: int, item_id: str) -> bool:
+    """Ajoute ou retire un favori et retourne son nouvel état (True = favori)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT OR IGNORE INTO user_favorites (user_id, item_id) VALUES (?, ?)",
+            (user_id, str(item_id)),
+        )
+        is_favorite = cursor.rowcount > 0
+        if not is_favorite:
+            await db.execute(
+                "DELETE FROM user_favorites WHERE user_id = ? AND item_id = ?",
+                (user_id, str(item_id)),
+            )
+        await db.commit()
+        return is_favorite
+
+
+async def is_favorite(user_id: int, item_id: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM user_favorites WHERE user_id = ? AND item_id = ?",
+            (user_id, str(item_id)),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def get_favorite_ids(user_id: int) -> set[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT item_id FROM user_favorites WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            return {str(row[0]) for row in await cursor.fetchall()}
+
+
+async def get_favorites(user_id: int) -> list[dict]:
+    """Offres enregistrées par un membre, de la plus récente à la plus ancienne."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT g.item_id, g.title, g.description, g.platforms, g.worth,
+                      g.end_date, g.claim_url, g.source_url, g.thumbnail,
+                      g.published_date, f.created_at
+               FROM user_favorites AS f
+               JOIN giveaway_items AS g ON g.item_id = f.item_id
+               WHERE f.user_id = ?
+               ORDER BY f.created_at DESC, g.title COLLATE NOCASE""",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "title": row[1],
+            "description": row[2],
+            "platforms": row[3],
+            "worth": row[4],
+            "end_date": row[5],
+            "open_giveaway_url": row[6],
+            "gamerpower_url": row[7],
+            "thumbnail": row[8],
+            "published_date": row[9],
+            "favorited_at": row[10],
+        }
+        for row in rows
+    ]
+
+
+async def clear_user_favorites(user_id: int) -> int:
+    """Efface les favoris d'un membre et retourne le nombre de lignes supprimées."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM user_favorites WHERE user_id = ?", (user_id,))
+        await db.commit()
+        return cursor.rowcount
