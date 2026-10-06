@@ -15,7 +15,9 @@ Les données viennent de l'API publique [GamerPower](https://www.gamerpower.com/
 - [Inviter le bot sur un serveur](#inviter-le-bot-sur-un-serveur)
 - [Lancer le bot](#lancer-le-bot)
 - [Commandes](#commandes)
+- [Données et confidentialité](#données-et-confidentialité)
 - [Fonctionnement](#fonctionnement)
+- [Feuille de route](#feuille-de-route)
 - [Configuration](#configuration)
 - [Structure du projet](#structure-du-projet)
 - [Développement et tests](#développement-et-tests)
@@ -44,6 +46,8 @@ Les données viennent de l'API publique [GamerPower](https://www.gamerpower.com/
 - **Vérification automatique** toutes les heures, avec mention du rôle concerné, prix barré,
   compte à rebours de fin d'offre et bouton « Récupérer le jeu ».
 - **Jamais deux fois le même jeu** : les annonces déjà envoyées sont mémorisées.
+- **Catalogue privé des offres** avec `/free` : navigation page par page et lien pour récupérer le jeu.
+- **Favoris personnels** : bouton ❤️, commande `/favoris` et commande `/mes-donnees` pour effacer ses favoris.
 
 > ℹ️ Les administrateurs passent outre **toutes** les permissions de salon : Discord ne permet
 > pas de les empêcher d'écrire. Le bot supprime donc automatiquement tout message posté dans
@@ -109,17 +113,35 @@ Puis, sur le serveur Discord : `/setup-auto`.
 
 ## Commandes
 
-Toutes les commandes sont réservées aux administrateurs et répondent en message éphémère
-(visible de toi seul).
+Les commandes de configuration sont réservées aux administrateurs. Les commandes publiques et personnelles répondent en privé lorsque c'est pertinent.
 
-| Commande | Effet |
-| --- | --- |
-| `/setup-auto` | Choisit les plateformes et qui voit `#choisir-ses-roles`, puis crée/met à jour catégorie, rôles, salons et panneau de boutons. Rejouable sans rien dupliquer. |
-| `/acces-salon-roles` | Change les rôles autorisés à voir `#choisir-ses-roles` (menu vide = tout le monde). Le salon reste en lecture seule. |
-| `/test-jeux` | Force une vérification immédiate des jeux gratuits. |
-| `/reset-jeux` | Vide l'historique des envois : les jeux récents peuvent être réannoncés. |
-| `/reset-all` | Supprime tout ce que le bot a créé (salons, rôles, catégorie, messages). Demande confirmation. |
-| `/ping` | Vérifie que le bot répond et affiche sa latence. |
+| Commande | Accès | Effet |
+| --- | --- | --- |
+| `/setup-auto` | Admin | Choisit les plateformes et qui voit `#choisir-ses-roles`, puis crée/met à jour catégorie, rôles, salons et panneau de boutons. Rejouable sans rien dupliquer. |
+| `/config` | Admin | Rouvre le même panneau de configuration que `/setup-auto`. |
+| `/acces-salon-roles` | Admin | Change les rôles autorisés à voir `#choisir-ses-roles` (menu vide = tout le monde). Le salon reste en lecture seule. |
+| `/test-jeux` | Admin | Force une vérification immédiate des jeux gratuits. |
+| `/reset-jeux` | Admin | Vide l'historique des envois : les jeux récents peuvent être réannoncés. |
+| `/reset-all` | Admin | Supprime tout ce que le bot a créé (salons, rôles, catégorie, messages). Demande confirmation. |
+| `/free` | Tout le monde | Parcourt les offres retournées par GamerPower. La réponse est éphémère ; les boutons permettent de parcourir et d'enregistrer un favori. Limite d'une requête par utilisateur toutes les 15 secondes. |
+| `/favoris` | Tout le monde | Affiche ses favoris en privé ; le bouton permet de retirer une offre. |
+| `/mes-donnees` | Tout le monde | Demande confirmation puis supprime les favoris associés au compte Discord. |
+| `/ping` | Tout le monde | Vérifie que le bot répond et affiche sa latence. |
+| `/info` | Tout le monde | Affiche la latence, le nombre de serveurs et les liens utiles. |
+
+---
+
+## Données et confidentialité
+
+Le bot utilise SQLite (`DB_PATH`) et conserve :
+
+- la configuration technique des serveurs (identifiants de salons et rôles) et les identifiants d'offres déjà annoncées, pour éviter les doublons ;
+- les champs publics d'une offre GamerPower nécessaires à l'affichage (identifiant, titre, plateforme, valeur, liens, description et dates) ;
+- pour les favoris seulement, l'identifiant Discord du membre, l'identifiant de l'offre et la date d'ajout.
+
+Le bot ne stocke pas le nom Discord, les messages privés, les messages des membres ni la preuve qu'un jeu a été réclamé. Les réponses de `/free` et `/favoris` sont éphémères. Les offres publiques non favorites sont supprimées du catalogue après 90 jours sans nouvelle observation ; celles gardées en favori restent jusqu'au retrait du favori ou à la suppression des données.
+
+Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confirme. Cette action ne supprime pas les réglages du serveur ni les informations publiques d'une offre qui serait encore en favori par quelqu'un d'autre.
 
 ---
 
@@ -149,6 +171,12 @@ Deux subtilités Discord sont gérées dans `utils/permissions.py` :
 
 ---
 
+## Feuille de route
+
+Les prochaines fonctionnalités sont planifiées par étapes dans [`ROADMAP.md`](ROADMAP.md). Les notes, genres, joueurs et réclamations ne sont pas inventés : ils seront affichés uniquement si une source fiable les fournit ou si l'utilisateur les déclare explicitement.
+
+---
+
 ## Configuration
 
 Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.example`) :
@@ -160,6 +188,9 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `CHECK_INTERVAL_HOURS` | `1` | Fréquence de vérification. |
 | `MAX_GAMES` | `10` | Jeux récents examinés à chaque tour. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `PROJECT_URL` | dépôt GitHub | Lien du projet affiché par `/info`. |
+| `SUPPORT_URL` | page Issues GitHub | Lien de support affiché par `/info`. |
+| `VOTE_URL` | *(vide)* | Lien de vote affiché par `/info`, si le bot est référencé sur un annuaire. |
 | `CATEGORY_NAME` | `🎮 Jeux gratuits` | Nom de la catégorie créée. |
 | `ROLES_CHANNEL` | `choisir-ses-roles` | Nom du salon de choix des rôles. |
 | `TEST_GUILD_ID` | *(serveur de test)* | Serveur dont on purge les anciennes commandes au démarrage ; `0` pour désactiver. |
@@ -181,10 +212,11 @@ Les mots-clés sont cherchés en minuscules dans le champ `platforms` renvoyé p
 ```
 main.py                 point d'entrée : démarre le bot et charge les cogs
 config.py               toute la configuration (.env, plateformes, noms des salons)
-database.py             stockage SQLite (salons, rôles, accès, historique)
+database.py             stockage SQLite (configuration, annonces, catalogue, favoris)
 cogs/
-  jeux.py               commandes, menus, boucle de vérification
-  setup.py              /ping
+  jeux.py               commandes, menus, navigation des offres, boucle de vérification
+  setup.py              /ping et /info
+ROADMAP.md              feuille de route des prochaines versions
 services/
   gamerpower.py         appel à l'API (et rien d'autre)
 utils/
@@ -202,7 +234,7 @@ tests/                  tests automatiques (pytest), sans token ni réseau
 ```bash
 pip install -r requirements-dev.txt
 
-pytest                 # 95 tests, moins d'une seconde
+pytest                 # tests unitaires et parcours simulés, sans token ni réseau
 ruff check .           # style et erreurs courantes
 ```
 
