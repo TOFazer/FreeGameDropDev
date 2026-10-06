@@ -107,7 +107,7 @@ Onglet **OAuth2 → URL Generator** : scopes `bot` + `applications.commands`, pu
 Lien tout prêt (remplace `CLIENT_ID` par l'identifiant de ton application) :
 
 ```
-https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=268561424&scope=bot%20applications.commands
+https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=268528656&scope=bot%20applications.commands
 ```
 
 > Le **rôle du bot doit être placé au-dessus** des rôles de plateforme dans les paramètres du
@@ -215,6 +215,12 @@ Pour l'activer :
 
 Le tableau de bord ne stocke aucune donnée de jeu séparée : il lit la même base SQLite que le bot.
 
+**Sécurité des sessions.** Le cookie de session (`HttpOnly`, `SameSite=Lax`) reçoit aussi
+l'attribut `Secure` dès que `DASHBOARD_BASE_URL` commence par `https://` — donc automatiquement en
+production normale, sans rien à faire. Si tu places un reverse proxy qui termine le TLS devant le
+bot (le serveur interne reste alors en HTTP), force quand même `DASHBOARD_COOKIE_SECURE=true`.
+Ne mets jamais `DASHBOARD_COOKIE_SECURE=false` sur un tableau de bord exposé publiquement.
+
 ---
 
 ## Feuille de route
@@ -254,6 +260,7 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `DASHBOARD_HOST` / `DASHBOARD_PORT` | `0.0.0.0` / `8080` | Adresse d'écoute du tableau de bord. |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | — | Identifiants OAuth2 de l'application Discord, nécessaires pour la connexion sur le tableau de bord. |
 | `DISCORD_OAUTH_REDIRECT_URI` | `DASHBOARD_BASE_URL/auth/callback` | URL de redirection OAuth2, doit correspondre à celle déclarée sur Discord. |
+| `DASHBOARD_COOKIE_SECURE` | auto (`true` si `DASHBOARD_BASE_URL` est en `https://`) | Ajoute l'attribut `Secure` aux cookies de session. À laisser activé dès que le tableau de bord est exposé publiquement en HTTPS. |
 
 **Ajouter une plateforme** (exemple : Amazon Prime Gaming) — une seule ligne dans `config.py` :
 

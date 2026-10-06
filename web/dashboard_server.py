@@ -34,7 +34,14 @@ async def handle_api_stats(request: web.Request) -> web.Response:
 async def handle_login(request: web.Request) -> web.Response:
     state, url = await dashboard.start_login(request.app[BOT_KEY])
     response = web.HTTPFound(url)
-    response.set_cookie(STATE_COOKIE, state, max_age=600, httponly=True, samesite="Lax")
+    response.set_cookie(
+        STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        samesite="Lax",
+        secure=config.DASHBOARD_COOKIE_SECURE,
+    )
     raise response
 
 
@@ -66,6 +73,7 @@ async def handle_callback(request: web.Request) -> web.Response:
         max_age=dashboard.SESSION_DURATION_HOURS * 3600,
         httponly=True,
         samesite="Lax",
+        secure=config.DASHBOARD_COOKIE_SECURE,
     )
     raise response
 
