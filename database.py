@@ -143,6 +143,18 @@ async def init_db():
                 await db.execute(f"ALTER TABLE giveaway_items ADD COLUMN {column} {definition}")
             except aiosqlite.OperationalError:
                 pass  # la colonne existe déjà
+        # Colonnes ajoutées aux sessions du tableau de bord :
+        # - csrf_token : jeton anti-CSRF propre à la session, exigé sur chaque formulaire ;
+        # - guilds_json : instantané (id, nom, icône) des serveurs que le membre peut gérer,
+        #   pris au moment de la connexion — on ne stocke JAMAIS son jeton OAuth Discord.
+        for column, definition in (
+            ("csrf_token", "TEXT NOT NULL DEFAULT ''"),
+            ("guilds_json", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            try:
+                await db.execute(f"ALTER TABLE dashboard_sessions ADD COLUMN {column} {definition}")
+            except aiosqlite.OperationalError:
+                pass  # la colonne existe déjà
         await db.commit()
 
 
@@ -726,20 +738,29 @@ async def get_all_guild_reminder_channels() -> dict:
 
 
 async def create_dashboard_session(
-    session_id: str, user_id: int, username: str, avatar: str, expires_at: str
+    session_id: str,
+    user_id: int,
+    username: str,
+    avatar: str,
+    expires_at: str,
+    csrf_token: str = "",
+    guilds_json: str = "",
 ) -> None:
     """`expires_at` doit être au format SQLite ``YYYY-MM-DD HH:MM:SS`` (UTC), comparable
     directement à ``CURRENT_TIMESTAMP``."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            """INSERT INTO dashboard_sessions (session_id, user_id, username, avatar, expires_at)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO dashboard_sessions
+                   (session_id, user_id, username, avatar, expires_at, csrf_token, guilds_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
                    user_id = excluded.user_id,
                    username = excluded.username,
                    avatar = excluded.avatar,
-                   expires_at = excluded.expires_at""",
-            (session_id, user_id, username, avatar, expires_at),
+                   expires_at = excluded.expires_at,
+                   csrf_token = excluded.csrf_token,
+                   guilds_json = excluded.guilds_json""",
+            (session_id, user_id, username, avatar, expires_at, csrf_token, guilds_json),
         )
         await db.commit()
 
@@ -747,14 +768,22 @@ async def create_dashboard_session(
 async def get_dashboard_session(session_id: str) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            """SELECT user_id, username, avatar, expires_at FROM dashboard_sessions
+            """SELECT user_id, username, avatar, expires_at, csrf_token, guilds_json
+               FROM dashboard_sessions
                WHERE session_id = ? AND expires_at > CURRENT_TIMESTAMP""",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
     if row is None:
         return None
-    return {"user_id": row[0], "username": row[1], "avatar": row[2], "expires_at": row[3]}
+    return {
+        "user_id": row[0],
+        "username": row[1],
+        "avatar": row[2],
+        "expires_at": row[3],
+        "csrf_token": row[4] or "",
+        "guilds_json": row[5] or "",
+    }
 
 
 async def delete_dashboard_session(session_id: str) -> None:
@@ -766,4 +795,36 @@ async def delete_dashboard_session(session_id: str) -> None:
 async def purge_expired_sessions() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM dashboard_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
+        await db.commit()
+
+
+async def count_user_data(user_id: int) -> dict:
+    """Résumé de ce que le bot conserve pour un membre (page « Compte » du tableau de bord)."""
+    queries = {
+        "favorites": "SELECT COUNT(*) FROM user_favorites WHERE user_id = ?",
+        "preferences": "SELECT COUNT(*) FROM user_preferences WHERE user_id = ?",
+        "notifications": "SELECT COUNT(*) FROM user_notification_settings WHERE user_id = ?",
+        "alert_history": "SELECT COUNT(*) FROM alert_history WHERE user_id = ?",
+    }
+    summary = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        for key, query in queries.items():
+            async with db.execute(query, (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                summary[key] = row[0] if row else 0
+    return summary
+
+
+async def delete_user_data(user_id: int) -> None:
+    """Efface tout ce qui est lié à un membre : favoris, préférences, alertes, historique
+    et sessions du tableau de bord. Les informations publiques des offres sont conservées."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        for table in (
+            "user_favorites",
+            "user_preferences",
+            "user_notification_settings",
+            "alert_history",
+            "dashboard_sessions",
+        ):
+            await db.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         await db.commit()

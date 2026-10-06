@@ -45,8 +45,11 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
   commun que les autres sources (`source`, `offer_type`, `genres`).
 - Les DLC et contenus sont distingués des jeux complets dès qu'une source le permet ; `/free` et
   `/historique` peuvent filtrer dessus.
-- Tableau de bord web optionnel (`web/dashboard.py`, `web/dashboard_server.py`), avec connexion
-  Discord OAuth2 (scope `identify` uniquement) et statistiques publiques en lecture seule.
+- Tableau de bord web optionnel (`web/dashboard.py`, `web/dashboard_server.py`), devenu centre de
+  configuration : connexion Discord OAuth2 (scopes `identify guilds`, jeton jamais stocké),
+  liste des serveurs gérables avec état d'installation du bot, configuration des salons/rôles par
+  plateforme, vérification des permissions du bot, vitrine publique des offres (`/offres`),
+  alertes personnelles et page « Compte » avec suppression des données.
 
 ## Prochains lots
 
@@ -62,7 +65,7 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
 1. Sources supplémentaires (ex. Prime Gaming, GOG) normalisées dans le même format d'offre commun.
 2. Historique des prix seulement à partir de relevés effectivement observés par le bot ; ne pas inventer un prix historique avant le premier relevé.
 3. Recommandations basées sur les préférences choisies par le membre, avant d'envisager de l'apprentissage automatique.
-4. Tableau de bord web : gestion des préférences et alertes personnelles depuis l'interface, pas uniquement en lecture seule.
+4. ~~Tableau de bord web : gestion des préférences et alertes personnelles depuis l'interface, pas uniquement en lecture seule.~~ Livré : pages « Serveurs », « Offres », « Alertes » et « Compte ».
 
 ## V4 — Collection et expérience étendue
 
