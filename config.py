@@ -34,6 +34,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = _env_str(name)
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
 # ---------- Discord ----------
 
 DISCORD_TOKEN: str = _env_str("DISCORD_TOKEN")
@@ -190,11 +197,17 @@ DEFAULT_COLOUR = 0xF1C40F
 
 # ---------- Tableau de bord web ----------
 
-DASHBOARD_ENABLED: bool = _env_str("DASHBOARD_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+DASHBOARD_ENABLED: bool = _env_bool("DASHBOARD_ENABLED", False)
 DASHBOARD_HOST: str = _env_str("DASHBOARD_HOST", "0.0.0.0")
 DASHBOARD_PORT: int = _env_int("DASHBOARD_PORT", 8080)
 DASHBOARD_SECRET_KEY: str = _env_str("DASHBOARD_SECRET_KEY", "change-me-in-prod")
 DASHBOARD_BASE_URL: str = _env_str("DASHBOARD_BASE_URL", f"http://localhost:{DASHBOARD_PORT}")
+
+# Cookies « Secure » par défaut dès que l'URL publique est en HTTPS (donc automatiquement en
+# production normale) ; surchargeable explicitement si un proxy termine le TLS en amont.
+DASHBOARD_COOKIE_SECURE: bool = _env_bool(
+    "DASHBOARD_COOKIE_SECURE", DASHBOARD_BASE_URL.strip().lower().startswith("https://")
+)
 
 DISCORD_CLIENT_ID: str = _env_str("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET: str = _env_str("DISCORD_CLIENT_SECRET")

@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import aiohttp
 
@@ -29,8 +30,7 @@ def build_authorize_url(state: str) -> str:
         "scope": "identify",
         "state": state,
     }
-    query = "&".join(f"{key}={value}" for key, value in params.items())
-    return f"{config.DISCORD_API_BASE_URL}/oauth2/authorize?{query}"
+    return f"{config.DISCORD_API_BASE_URL}/oauth2/authorize?{urlencode(params)}"
 
 
 async def exchange_code_for_token(code: str) -> dict | None:
