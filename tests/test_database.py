@@ -84,3 +84,49 @@ async def test_init_db_rejouable(db):
     await db.init_db()
 
     assert await db.get_roles_channel(7) == 111
+
+
+async def test_catalogue_et_favoris_par_utilisateur(db):
+    await db.save_giveaways(
+        [
+            {
+                "id": 123,
+                "title": "Un jeu",
+                "platforms": "PC (Steam)",
+                "open_giveaway_url": "https://example.com/claim",
+                "gamerpower_url": "https://example.com/source",
+            }
+        ]
+    )
+
+    assert await db.toggle_favorite(42, "123") is True
+    assert await db.toggle_favorite(43, "123") is True
+    assert await db.is_favorite(42, "123") is True
+    assert await db.get_favorite_ids(42) == {"123"}
+    favorites = await db.get_favorites(42)
+    assert len(favorites) == 1
+    assert favorites[0]["id"] == "123"
+    assert favorites[0]["title"] == "Un jeu"
+    assert favorites[0]["platforms"] == "PC (Steam)"
+    assert favorites[0]["open_giveaway_url"] == "https://example.com/claim"
+    assert favorites[0]["gamerpower_url"] == "https://example.com/source"
+    assert favorites[0]["favorited_at"]
+
+    assert await db.toggle_favorite(42, "123") is False
+    assert await db.get_favorite_ids(42) == set()
+    assert await db.get_favorite_ids(43) == {"123"}
+
+
+async def test_suppression_des_donnees_utilisateur_isolee(db):
+    await db.save_giveaways([{"id": 1, "title": "Jeu"}])
+    await db.save_giveaways([{"id": 2, "title": "Autre jeu"}])
+    await db.toggle_favorite(42, "1")
+    await db.toggle_favorite(42, "2")
+    await db.toggle_favorite(43, "1")
+
+    assert await db.clear_user_favorites(42) == 2
+
+    assert await db.get_favorite_ids(42) == set()
+    assert await db.get_favorite_ids(43) == {"1"}
+    remaining = await db.get_favorites(43)
+    assert remaining[0]["title"] == "Jeu"

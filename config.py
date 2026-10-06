@@ -44,6 +44,13 @@ TEST_GUILD_ID: int | None = _env_int("TEST_GUILD_ID", 1391429196105912452) or No
 
 LOG_LEVEL: str = _env_str("LOG_LEVEL", "INFO").upper()
 
+# Liens affichés dans la commande /info.
+PROJECT_URL: str = _env_str(
+    "PROJECT_URL", "https://github.com/TOFazer/release-bot-FreeGameDrop"
+)
+SUPPORT_URL: str = _env_str("SUPPORT_URL", f"{PROJECT_URL}/issues")
+VOTE_URL: str = _env_str("VOTE_URL")
+
 
 # ---------- Base de données ----------
 
