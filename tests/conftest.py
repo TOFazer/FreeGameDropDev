@@ -76,6 +76,37 @@ class FakeMessage:
         self.deleted = True
 
 
+class FakeSentMessage:
+    def __init__(self, channel, message_id, payload):
+        self.channel = channel
+        self.id = message_id
+        self.payload = payload
+        self.author = channel.guild.me
+        self.deleted = False
+
+    async def edit(self, **kwargs):
+        if self.deleted:
+            raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Unknown Message")
+        self.payload.update(kwargs)
+
+    async def delete(self):
+        self.deleted = True
+
+
+class FakePartialMessage:
+    def __init__(self, channel, message_id):
+        self.channel = channel
+        self.message_id = message_id
+
+    async def edit(self, **kwargs):
+        message = next(
+            (m for m in self.channel.messages if m.id == self.message_id and not m.deleted), None
+        )
+        if message is None:
+            raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Unknown Message")
+        await message.edit(**kwargs)
+
+
 class FakeChannel:
     def __init__(self, name, category, overwrites=None, topic=None, channel_id=None):
         self.name = name
@@ -94,14 +125,28 @@ class FakeChannel:
         return f"<#{self.name}>"
 
     async def edit(self, **kwargs):
+        previous_category = self.category
+        if "category" in kwargs and previous_category and self in previous_category.channels:
+            previous_category.channels.remove(self)
         self.__dict__.update(kwargs)
+        if "category" in kwargs and kwargs["category"] is not None:
+            self.category = kwargs["category"]
+            if self not in self.category.channels:
+                self.category.channels.append(self)
+        elif "category" in kwargs:
+            self.category = None
 
     async def move(self, **kwargs):
         self.moved = True
 
     async def send(self, **kwargs):
         self.sent.append(kwargs)
-        return kwargs
+        message = FakeSentMessage(self, next(_ids), kwargs)
+        self.messages.append(message)
+        return message
+
+    def get_partial_message(self, message_id):
+        return FakePartialMessage(self, message_id)
 
     def history(self, limit=50):
         messages = list(self.messages)[:limit]
@@ -168,6 +213,10 @@ class FakeGuild:
                 if channel.id == channel_id:
                     return channel
         return None
+
+    @property
+    def text_channels(self):
+        return [channel for category in self.categories for channel in category.text_channels]
 
     def add_role(self, name):
         role = FakeRole(name, next(_ids))

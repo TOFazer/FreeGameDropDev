@@ -10,16 +10,14 @@ from urllib.parse import urlencode
 
 import discord
 
-# Permissions demandées à l'installation : créer les salons/rôles, lire et écrire
-# les annonces. Identiques à celles documentées dans le README et le tableau de bord.
+# Permissions indispensables : créer les salons/rôles et publier les annonces.
+# La lecture de l'historique et la modération des messages admin sont facultatives.
 INVITE_PERMISSIONS = discord.Permissions(
     manage_channels=True,
     manage_roles=True,
     view_channel=True,
-    read_message_history=True,
     send_messages=True,
     embed_links=True,
-    manage_messages=True,
 ).value
 
 

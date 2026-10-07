@@ -51,9 +51,19 @@ async def _fetch_source(name: str, fetch) -> list[dict]:
         log.exception("Source d'offres « %s » en erreur, ignorée pour ce tour", name)
         return []
     if not isinstance(games, list):
+        log.warning("Format inattendu de la source « %s » : une liste était attendue", name)
         return []
-    return [_normalize(game, name) for game in games if isinstance(game, dict)]
 
+    normalized = []
+    for index, game in enumerate(games):
+        if not isinstance(game, dict) or game.get("id") is None or not str(game.get("id")).strip():
+            log.debug("Offre %s ignorée depuis « %s » : entrée invalide ou sans identifiant", index, name)
+            continue
+        try:
+            normalized.append(_normalize(game, name))
+        except Exception:
+            log.exception("Offre %s invalide dans la source « %s » ; elle est ignorée", index, name)
+    return normalized
 
 async def fetch_offers(sources=None) -> list[dict]:
     """Interroge les sources activées en parallèle et fusionne les résultats.
@@ -61,7 +71,8 @@ async def fetch_offers(sources=None) -> list[dict]:
     Une source en échec ou trop lente ne bloque pas les autres : elle est
     simplement ignorée pour ce tour-ci.
     """
-    enabled = [name for name in (sources or config.OFFER_SOURCES) if name in SOURCES]
+    configured = config.OFFER_SOURCES if sources is None else sources
+    enabled = [name for name in configured if name in SOURCES]
     if not enabled:
         return []
 
@@ -73,7 +84,7 @@ async def fetch_offers(sources=None) -> list[dict]:
     merged: list[dict] = []
     for games in results:
         for game in games:
-            item_id = str(game.get("id"))
+            item_id = str(game.get("id") or "").strip()
             if not item_id or item_id in seen_ids:
                 continue
             seen_ids.add(item_id)

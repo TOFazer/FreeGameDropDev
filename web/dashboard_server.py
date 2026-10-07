@@ -146,13 +146,19 @@ async def _render_guild_config(
     session: dict, entry: dict, guild, *, saved: bool = False
 ) -> web.Response:
     guild_id = int(entry["id"])
+    platform_channels = await database.get_platform_channels(guild_id)
+    selected = await database.get_guild_platforms(guild_id)
+    if selected is not None:
+        platform_channels = {
+            key: channel_id for key, channel_id in platform_channels.items() if key in selected
+        }
     return web.Response(
         text=dashboard.render_guild_config(
             session,
             entry,
             channels=_guild_channels(guild),
             roles=_guild_roles(guild),
-            platform_channels=await database.get_platform_channels(guild_id),
+            platform_channels=platform_channels,
             platform_roles=await database.get_guild_platform_roles(guild_id),
             reminder_channel_id=await database.get_guild_reminder_channel(guild_id),
             permissions=_guild_permissions(guild),
@@ -190,13 +196,16 @@ async def handle_guild_config_save(request: web.Request) -> web.Response:
         value = int(text)
         return value if value in allowed else None
 
+    selected_platforms = []
     for key in config.PLATFORM_KEYS:
         channel_id = _clean_id(data.get(f"channel_{key}"), valid_channels)
         if channel_id is not None:
             await database.set_platform_channel(guild_id, key, channel_id)
+            selected_platforms.append(key)
         role_id = _clean_id(data.get(f"role_{key}"), valid_roles)
         if role_id is not None:
             await database.set_platform_role(guild_id, key, role_id)
+    await database.set_guild_platforms(guild_id, selected_platforms)
 
     reminder_id = _clean_id(data.get("reminder_channel"), valid_channels)
     if reminder_id is not None:

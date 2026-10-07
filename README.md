@@ -18,7 +18,7 @@ alertes qu'il veut recevoir** — plateforme par plateforme, en un clic.
 
 <!-- Une instance publique du bot est en ligne ? Remplace le lien ci-dessous par ton
      invitation Discord et décommente le bloc :
-<a href="https://discord.com/oauth2/authorize?client_id=TON_CLIENT_ID&permissions=268528656&scope=bot%20applications.commands">
+<a href="https://discord.com/oauth2/authorize?client_id=TON_CLIENT_ID&permissions=268454928&scope=bot%20applications.commands">
   <img src="https://img.shields.io/badge/➕_Ajouter_FreeGameDrop_à_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Ajouter FreeGameDrop à Discord">
 </a>
 -->
@@ -139,10 +139,10 @@ python main.py
 Créer le bot et récupérer le token : <https://discord.com/developers/applications>
 → **New Application** → onglet **Bot** → **Reset Token** → copier dans `.env`.
 
-Puis, sur le serveur Discord : `/setup-auto` — la catégorie, les rôles, les salons et le
-panneau de boutons sont créés d'un coup. La commande est rejouable sans rien dupliquer.
-
-Aucun *intent privilégié* n'est nécessaire.
+Puis, sur le serveur Discord : `/setup-auto` → coche les plateformes → **Créer / mettre à jour**.
+La catégorie, les rôles, les salons privés et le panneau de boutons sont créés ou réparés d'un coup.
+Une vérification des offres démarre juste après ; la surveillance continue ensuite toutes les heures.
+Relancer la commande met à jour les choix sans créer de doublons. Aucun *intent privilégié* n'est nécessaire.
 
 ---
 
@@ -196,16 +196,17 @@ Onglet **OAuth2 → URL Generator** : scopes `bot` + `applications.commands`, pu
 
 | Permission | À quoi elle sert |
 | --- | --- |
-| Gérer les salons | créer la catégorie et les salons |
-| Gérer les rôles | créer les rôles de plateforme et les distribuer |
-| Voir les salons / Lire l'historique | accéder à ses propres salons |
-| Envoyer des messages / Liens intégrés | poster les annonces |
-| Gérer les messages | effacer ce qui est écrit dans `#choisir-ses-roles` |
+| Gérer les salons | créer et réparer la catégorie et les salons |
+| Gérer les rôles | créer et attribuer les rôles de plateforme |
+| Voir les salons | accéder aux salons FreeGameDrop |
+| Envoyer des messages / Liens intégrés | publier les annonces et le panneau de rôles |
+
+**Permissions facultatives :** `Lire l'historique` et `Gérer les messages` permettent de nettoyer les anciens panneaux et les messages écrits par les administrateurs dans `#choisir-ses-roles`. Elles ne sont pas nécessaires pour l'installation ni pour recevoir les alertes.
 
 Lien tout prêt (remplace `CLIENT_ID` par l'identifiant de ton application) :
 
 ```
-https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=268528656&scope=bot%20applications.commands
+https://discord.com/oauth2/authorize?client_id=CLIENT_ID&permissions=268454928&scope=bot%20applications.commands
 ```
 
 > Le **rôle du bot doit être placé au-dessus** des rôles de plateforme dans les paramètres du
@@ -258,8 +259,8 @@ Puis, sur le serveur Discord : `/setup-auto`.
   (voir [Tableau de bord web](#tableau-de-bord-web)).
 
 > ℹ️ Les administrateurs passent outre **toutes** les permissions de salon : Discord ne permet
-> pas de les empêcher d'écrire. Le bot supprime donc automatiquement tout message posté dans
-> `#choisir-ses-roles`, y compris le leur (il lui faut « Gérer les messages » pour ça).
+> pas de les empêcher d'écrire. Si le bot a la permission facultative **Gérer les messages**, il
+> supprime leurs messages dans `#choisir-ses-roles` ; sans elle, ils restent visibles.
 
 ---
 
@@ -269,7 +270,7 @@ Les commandes de configuration sont réservées aux administrateurs. Les command
 
 | Commande | Accès | Effet |
 | --- | --- | --- |
-| `/setup-auto` | Admin | Choisit les plateformes et qui voit `#choisir-ses-roles`, puis crée/met à jour catégorie, rôles, salons et panneau de boutons. Rejouable sans rien dupliquer. |
+| `/setup-auto` | Admin | Coche les plateformes et clique sur **Créer / mettre à jour**. Crée/répare catégorie, rôles, salons et panneau ; les plateformes décochées sont masquées et réactivables. Lance une première vérification des offres immédiatement. |
 | `/config` | Admin | Rouvre le même panneau de configuration que `/setup-auto`. |
 | `/acces-salon-roles` | Admin | Change les rôles autorisés à voir `#choisir-ses-roles` (menu vide = tout le monde). Le salon reste en lecture seule. |
 | `/test-jeux` | Admin | Force une vérification immédiate des jeux gratuits. |
@@ -489,7 +490,7 @@ L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` s
 
 | Symptôme | Cause et solution |
 | --- | --- |
-| « Il me manque une permission » | Donne au bot **Gérer les salons**, **Gérer les rôles** et **Gérer les messages**, et remonte son rôle au-dessus des rôles de plateforme. |
+| « Il me manque une permission » | Accorde au bot **Gérer les salons**, **Gérer les rôles**, **Voir les salons**, **Envoyer des messages** et **Intégrer des liens**. Pour attribuer un rôle, place aussi le rôle du bot au-dessus des rôles de plateforme. |
 | Les boutons répondent « Ce rôle n'existe plus » | Un rôle a été supprimé à la main : relance `/setup-auto`. |
 | Des membres écrivent quand même dans `#choisir-ses-roles` | Ce sont des administrateurs (Discord les autorise toujours) ; leurs messages sont effacés si le bot a **Gérer les messages**. |
 | Les commandes n'apparaissent pas | Le bot a besoin du scope `applications.commands` ; sinon attends quelques minutes ou redémarre Discord. |
@@ -502,3 +503,10 @@ L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` s
 
 Publié sous [licence MIT](LICENSE) — utilisation, modification et redistribution libres,
 y compris pour ton propre serveur ou ton hébergement public.
+
+## Validation avant lancement
+
+La checklist de recette Discord, les corrections de la phase 1 et les limites encore connues
+sont suivies dans [PHASE1_VALIDATION.md](PHASE1_VALIDATION.md).
+Un panneau expiré ou ouvert avant un redémarrage se reprend en relançant `/setup-auto`.
+Un salon homonyme non enregistré n'est pas adopté automatiquement : renomme-le pour poursuivre.

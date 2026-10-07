@@ -48,6 +48,21 @@ async def init_db():
                 channel_id INTEGER
             )"""
         )
+        # Message du panneau de rôles à mettre à jour (sans lire/supprimer l'historique).
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS roles_panel_messages (
+                guild_id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL
+            )"""
+        )
+        # Plateformes effectivement suivies par chaque serveur. L'absence de ligne
+        # signifie une ancienne configuration : toutes les routes enregistrées restent actives.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS guild_platform_selection (
+                guild_id INTEGER PRIMARY KEY,
+                platforms TEXT NOT NULL DEFAULT ''
+            )"""
+        )
         # rôles autorisés à VOIR ce salon (vide = tout le monde)
         await db.execute(
             """CREATE TABLE IF NOT EXISTS roles_channel_access (
@@ -192,7 +207,7 @@ async def set_platform_channel(guild_id: int, platform: str, channel_id: int):
 
 
 async def get_platform_channels(guild_id: int) -> dict:
-    """{plateforme: salon_id} pour un serveur."""
+    """{plateforme: salon_id} pour un serveur, y compris les salons temporairement désactivés."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT platform, channel_id FROM platform_channels WHERE guild_id = ?",
@@ -201,13 +216,49 @@ async def get_platform_channels(guild_id: int) -> dict:
             return {p: c for p, c in await cursor.fetchall()}
 
 
+async def set_guild_platforms(guild_id: int, platform_keys) -> None:
+    """Remplace la sélection des plateformes, y compris par une liste vide."""
+    platforms_text = ",".join(dict.fromkeys(str(key) for key in platform_keys or []))
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO guild_platform_selection (guild_id, platforms) VALUES (?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET platforms = excluded.platforms""",
+            (guild_id, platforms_text),
+        )
+        await db.commit()
+
+
+async def get_guild_platforms(guild_id: int) -> list[str] | None:
+    """Plateformes suivies, ou None pour une configuration historique non migrée."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT platforms FROM guild_platform_selection WHERE guild_id = ?", (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row is None:
+        return None
+    return [key for key in (row[0] or "").split(",") if key]
+
+
 async def get_routes():
-    """Retourne (serveur, route, salon, filtre) pour chaque salon à alimenter."""
+    """Retourne (serveur, route, salon, filtre) pour chaque salon actif à alimenter."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT guild_id, platform, channel_id, platform FROM platform_channels"
         ) as cursor:
-            return await cursor.fetchall()
+            routes = await cursor.fetchall()
+        async with db.execute(
+            "SELECT guild_id, platforms FROM guild_platform_selection"
+        ) as cursor:
+            selections = {
+                guild_id: set((platforms or "").split(","))
+                for guild_id, platforms in await cursor.fetchall()
+            }
+    return [
+        route
+        for route in routes
+        if route[0] not in selections or route[1] in selections[route[0]]
+    ]
 
 
 async def set_platform_role(guild_id: int, platform: str, role_id: int):
@@ -264,6 +315,26 @@ async def get_roles_channel(guild_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT channel_id FROM roles_channels WHERE guild_id = ?", (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def set_roles_panel_message(guild_id: int, message_id: int) -> None:
+    """Mémorise le panneau pour le mettre à jour directement lors des prochaines configurations."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO roles_panel_messages (guild_id, message_id) VALUES (?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET message_id = excluded.message_id""",
+            (guild_id, message_id),
+        )
+        await db.commit()
+
+
+async def get_roles_panel_message(guild_id: int) -> int | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT message_id FROM roles_panel_messages WHERE guild_id = ?", (guild_id,)
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
@@ -327,7 +398,9 @@ async def clear_guild(guild_id: int):
             "platform_channels",
             "platform_roles",
             "roles_channels",
+            "roles_panel_messages",
             "roles_channel_access",
+            "guild_platform_selection",
             "sent_items",
             "guilds",
         ):
@@ -601,7 +674,11 @@ async def get_giveaway_stats() -> dict:
         async with db.execute("SELECT COUNT(*) FROM guilds") as cursor:
             (known_guilds,) = await cursor.fetchone()
         async with db.execute(
-            "SELECT COUNT(DISTINCT guild_id) FROM platform_channels"
+            """SELECT COUNT(DISTINCT channels.guild_id)
+               FROM platform_channels AS channels
+               LEFT JOIN guild_platform_selection AS selected USING (guild_id)
+               WHERE selected.guild_id IS NULL
+                  OR instr(',' || selected.platforms || ',', ',' || channels.platform || ',') > 0"""
         ) as cursor:
             (configured_guilds,) = await cursor.fetchone()
 

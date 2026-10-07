@@ -145,3 +145,8 @@ async def test_api_injoignable(api, panne):
     api(panne)
 
     assert await epic_games.fetch_giveaways() == []
+
+
+async def test_element_malforme_nempeche_pas_les_autres(api):
+    api(FakeResponse(payload=_payload([{"promotions": "invalide"}, PROMO_GRATUITE])))
+    assert len(await epic_games.fetch_giveaways()) == 1

@@ -34,6 +34,27 @@ async def test_salons_et_roles_par_plateforme(db):
     assert sorted(await db.get_routes()) == [(7, "epic", 11, "epic"), (7, "steam", 10, "steam")]
 
 
+async def test_selection_plateformes_desactive_les_routes_non_cochees(db):
+    await db.set_platform_channel(7, "steam", 10)
+    await db.set_platform_channel(7, "epic", 11)
+    assert await db.get_guild_platforms(7) is None  # migration douce des anciennes installations
+
+    await db.set_guild_platforms(7, ["steam", "steam"])
+
+    assert await db.get_guild_platforms(7) == ["steam"]
+    assert await db.get_routes() == [(7, "steam", 10, "steam")]
+    await db.set_guild_platforms(7, [])
+    assert await db.get_guild_platforms(7) == []
+    assert await db.get_routes() == []
+
+
+async def test_panneau_roles_remplace_son_identifiant(db):
+    await db.set_roles_panel_message(7, 101)
+    await db.set_roles_panel_message(7, 202)
+
+    assert await db.get_roles_panel_message(7) == 202
+
+
 async def test_historique_des_envois(db):
     assert await db.is_sent(7, "1:steam") is False
 
@@ -63,16 +84,20 @@ async def test_isolation_entre_serveurs(db):
 
 async def test_clear_guild_efface_tout(db):
     await db.set_roles_channel(7, 111)
+    await db.set_roles_panel_message(7, 112)
     await db.set_roles_channel_access(7, [1, 2])
     await db.set_platform_channel(7, "steam", 10)
     await db.set_platform_role(7, "steam", 20)
+    await db.set_guild_platforms(7, ["steam"])
     await db.mark_sent(7, "1:steam")
 
     await db.clear_guild(7)
 
     assert await db.get_roles_channel(7) is None
+    assert await db.get_roles_panel_message(7) is None
     assert await db.get_roles_channel_access(7) == []
     assert await db.get_platform_channels(7) == {}
+    assert await db.get_guild_platforms(7) is None
     assert await db.get_guild_platform_roles(7) == {}
     assert await db.is_sent(7, "1:steam") is False
 

@@ -24,30 +24,29 @@ import aiohttp
 
 import config
 import database
+from utils import branding
 from utils import platforms as platform_utils
 from utils.offers import parse_end_datetime
 
 SESSION_COOKIE = "fgd_session"
 SESSION_DURATION_HOURS = 24 * 7
 
-# Permissions demandées dans le lien d'invitation (voir README : 268528656).
-INVITE_PERMISSIONS = 268528656
+# Partagé avec les liens /info et les annonces pour éviter des permissions contradictoires.
+INVITE_PERMISSIONS = branding.INVITE_PERMISSIONS
 
 # Bits OAuth : un membre peut configurer un serveur s'il en est propriétaire,
 # administrateur ou s'il possède « Gérer le serveur ».
 _PERM_ADMINISTRATOR = 0x8
 _PERM_MANAGE_GUILD = 0x20
 
-# Permissions dont le bot a besoin sur un serveur, vérifiées sur la page de
-# configuration (mêmes permissions que le lien d'invitation).
+# Permissions indispensables à la configuration et aux annonces. Lire l'historique
+# et gérer les messages peuvent améliorer la modération, mais ne sont pas obligatoires.
 REQUIRED_BOT_PERMISSIONS = (
-    ("view_channel", "Voir les salons", "lire ses propres salons d'annonces"),
+    ("view_channel", "Voir les salons", "accéder aux salons d'annonces"),
     ("send_messages", "Envoyer des messages", "poster les annonces de jeux gratuits"),
     ("embed_links", "Intégrer des liens", "afficher les offres avec images et boutons"),
-    ("read_message_history", "Lire l'historique", "retrouver ses propres messages"),
-    ("manage_channels", "Gérer les salons", "créer la catégorie et les salons via /setup-auto"),
+    ("manage_channels", "Gérer les salons", "créer et réparer la catégorie et les salons"),
     ("manage_roles", "Gérer les rôles", "créer et attribuer les rôles de plateformes"),
-    ("manage_messages", "Gérer les messages", "garder #choisir-ses-roles en lecture seule"),
 )
 
 
