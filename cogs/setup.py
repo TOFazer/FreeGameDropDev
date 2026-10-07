@@ -8,7 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import branding, metrics, monitoring, rate_limits
+from utils import branding, design, metrics, monitoring, rate_limits
 
 
 def build_info_embed(bot: commands.Bot) -> discord.Embed:
@@ -19,7 +19,7 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
     embed = discord.Embed(
         title="🎮 FreeGameDrop",
         description="Les jeux gratuits du moment, annoncés automatiquement sur Discord.",
-        colour=discord.Colour.blurple(),
+        colour=discord.Colour(design.embed_colour("new")),
     )
     embed.add_field(name="Latence", value=latency_text, inline=True)
     embed.add_field(name="Serveurs", value=f"{len(bot.guilds):,}", inline=True)

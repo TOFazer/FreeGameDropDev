@@ -98,6 +98,33 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
   dépassé, base injoignable, `429` Discord, offre expirée ou non active, quotas atteints, journaux
   contenant un token.
 
+## Livré — V2.3 : identité visuelle FreeGameDrop et embeds repensés
+
+- **Identité de marque** (`utils/design.py`, documentée dans `DESIGN.md`) : FreeGameDrop en trois
+  mots (**Gaming — Moderne — Premium**), sous la marque mère Orvex restée discrète
+  (« 🎁 FreeGameDrop · par Orvex » en pied de page).
+- **Palette** : couleur principale `#7C3AED` (boutons, liens, accents, filet des embeds), couleur
+  secondaire `#22D3EE` (stats, catégories, détails), neutres pour un thème sombre sans noir pur
+  (`#0B0E14` / `#121622` / `#1A1F2E` / `#F2F4F8` / `#9AA3B5` / `#272E42`).
+- **Couleurs plateformes séparées de la marque** : Steam `#66C0F4`, Epic `#D9D9D9`, GOG `#86328B`,
+  Ubisoft `#0070FF` — utilisées uniquement en badges, rôles et filtres ; l'embed d'une offre
+  porte toujours la couleur de la marque, jamais celle d'une plateforme.
+- **Typographie** : Inter partout, échelle H1/H2/H3/Body/Small/Button/Caption.
+- **Boutons** : un seul langage (primaire / secondaire / danger / désactivé ; rayon 10 px,
+  hauteur 40 px, états hover/active).
+- **Images** : présentation cohérente (ratio 16:9, `object-fit: cover`, coins 12 px) sur le
+  dashboard ; image pleine largeur dans les embeds.
+- **Badges** : `GRATUIT`, plateforme, `NOUVEAU`, `SE TERMINE BIENTÔT`, `EXPIRÉ`.
+- **Embeds repensés** (`utils/embeds.py`) : hiérarchie « quoi → jeu → prix → plateforme →
+  échéance → action », titre = nom du jeu, prix barré → GRATUIT, badge plateforme, urgence
+  🟢 > 24 h / 🟡 < 24 h / 🟠 < 6 h / 🔴 < 1 h, CTA principal « 🎁 Récupérer le jeu » vers la page
+  officielle, bouton secondaire « ➕ Ajouter FreeGameDrop », branding discret en pied.
+- **Variantes d'embed** : nouvelle offre, « 🔥 SE TERMINE BIENTÔT » (détection auto < 6 h),
+  « 🔄 OFFRE PROLONGÉE », « ❌ OFFRE TERMINÉE » (gris, pour l'historique) — un seul squelette,
+  testé pour Steam, Epic, GOG et Ubisoft.
+- **Dashboard** : thème sombre et police issus des tokens (`css_variables()`), boutons et
+  badges de marque, vignettes d'offres 16:9, échéance colorée selon l'urgence.
+
 ## Prochains lots
 
 ### V2 — compléments

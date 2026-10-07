@@ -4,7 +4,7 @@ import discord
 import pytest
 
 from config import PLATFORM_KEYS, PLATFORMS
-from utils import platforms
+from utils import design, platforms
 
 
 @pytest.mark.parametrize(
@@ -48,8 +48,15 @@ def test_nom_et_couleur_du_role():
 
 def test_valeurs_par_defaut_pour_une_plateforme_inconnue():
     assert platforms.emoji(None) == "🎁"
-    assert platforms.colour("inconnue") == 0xF1C40F
+    # la couleur par défaut est la couleur principale de la marque, jamais une plateforme
+    assert platforms.colour("inconnue") == design.rgb(design.PRIMARY)
     assert platforms.display_name("inconnue") == "inconnue"
+
+
+def test_couleurs_des_plateformes_issues_des_tokens_de_marque():
+    for key, platform in PLATFORMS.items():
+        assert platform.colour == design.rgb(design.PLATFORM_COLOURS[key])
+        assert platform.colour != design.rgb(design.PRIMARY)
 
 
 def test_catalogue_coherent():

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from utils import design
+
 load_dotenv()
 
 
@@ -196,8 +198,9 @@ REMINDER_EVENT_LABELS: dict = {
 ALERT_CADENCE_HOURS: float = _env_float("ALERT_CADENCE_HOURS", 1.0)
 
 # Fenêtre considérée comme « se termine bientôt » pour les alertes et /free.
-LAST_DAY_HOURS: float = _env_float("LAST_DAY_HOURS", 24.0)
-LAST_HOURS_THRESHOLD: float = _env_float("LAST_HOURS_THRESHOLD", 6.0)
+# Les seuils par défaut sont les niveaux d'urgence de l'identité visuelle.
+LAST_DAY_HOURS: float = _env_float("LAST_DAY_HOURS", design.WARNING_HOURS)
+LAST_HOURS_THRESHOLD: float = _env_float("LAST_HOURS_THRESHOLD", design.URGENT_HOURS)
 
 
 # ---------- Offres exceptionnelles ----------
@@ -243,17 +246,23 @@ class Platform:
 PLATFORMS = {
     platform.key: platform
     for platform in (
-        Platform("steam", "Steam", ("steam",), "🔵", 0x66C0F4),
-        Platform("epic", "Epic Games Store", ("epic games",), "⚪", 0xD9D9D9),
-        Platform("gog", "GOG", ("gog",), "🟣", 0xA855F7),
-        Platform("ubisoft", "Ubisoft", ("ubisoft",), "🔷", 0x0070FF),
+        Platform("steam", "Steam", ("steam",), "🔵", design.rgb(design.PLATFORM_COLOURS["steam"])),
+        Platform(
+            "epic", "Epic Games Store", ("epic games",), "⚪", design.rgb(design.PLATFORM_COLOURS["epic"])
+        ),
+        Platform("gog", "GOG", ("gog",), "🟣", design.rgb(design.PLATFORM_COLOURS["gog"])),
+        Platform(
+            "ubisoft", "Ubisoft", ("ubisoft",), "🔷", design.rgb(design.PLATFORM_COLOURS["ubisoft"])
+        ),
     )
 }
 PLATFORM_KEYS = list(PLATFORMS)
 
-# Utilisés quand la plateforme d'un jeu n'est pas reconnue.
+# Utilisés quand la plateforme d'un jeu n'est pas reconnue : la couleur par défaut
+# est la couleur principale de la marque (voir utils/design.py), jamais une couleur
+# de plateforme.
 DEFAULT_EMOJI = "🎁"
-DEFAULT_COLOUR = 0xF1C40F
+DEFAULT_COLOUR = design.rgb(design.PRIMARY)
 
 
 # ---------- Tableau de bord web ----------
