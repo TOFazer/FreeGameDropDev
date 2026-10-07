@@ -55,7 +55,11 @@ jobs:
 
       - name: Vérifier que le dépôt ne contient aucun secret
         run: |
-          if git grep -nE 'DISCORD_TOKEN=[^[:space:]]' -- ':!.env.example'; then
+          # Un vrai jeton de bot Discord a la forme base64.base64.base64
+          # (l'identifiant d'application, puis deux segments longs). Les exemples de
+          # documentation (« colle-ton-token-ici ») ne doivent pas déclencher l'alerte.
+          motif='[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,}'
+          if git grep -nEI "$motif" -- ':!.github/workflows/ci.yml'; then
             echo "❌ Un token ne doit jamais être versionné : il vit dans .env (ignoré par git)."
             exit 1
           fi
