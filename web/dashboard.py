@@ -24,7 +24,7 @@ import aiohttp
 
 import config
 import database
-from utils import branding
+from utils import branding, design
 from utils import platforms as platform_utils
 from utils.offers import parse_end_datetime
 
@@ -238,43 +238,80 @@ def _page(title: str, body: str, user: dict | None = None, active: str = "") -> 
 <meta charset="utf-8">
 <title>{html.escape(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="{design.GOOGLE_FONTS_URL}" rel="stylesheet">
 <style>
-body {{ font-family: system-ui, sans-serif; margin: 0; background: #0f1117; color: #e6e6e6; }}
-header {{ padding: 16px 24px; background: #161925; display: flex; align-items: center;
-          flex-wrap: wrap; gap: 12px; }}
-header h1 {{ margin: 0; font-size: 1.3rem; }}
+{design.css_variables()}
+* {{ box-sizing: border-box; }}
+body {{ font-family: {design.FONT_FAMILY}; font-size: 15px; line-height: {design.LINE_HEIGHT};
+        margin: 0; background: var(--fgd-background); color: var(--fgd-text); }}
+h1 {{ font-size: 28px; font-weight: 800; }}
+h2 {{ font-size: 22px; font-weight: 700; }}
+h3 {{ font-size: 17px; font-weight: 600; }}
+a {{ color: var(--fgd-primary-hover); }}
+header {{ padding: 16px 24px; background: var(--fgd-surface); border-bottom: 1px solid var(--fgd-border);
+          display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }}
+header h1 {{ margin: 0; font-size: 22px; font-weight: 700; }}
 header h1 a {{ color: inherit; text-decoration: none; }}
 nav {{ display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }}
-nav a {{ color: #b8bccf; text-decoration: none; padding: 8px 12px; border-radius: 8px; }}
-nav a:hover {{ background: #232841; color: white; }}
-nav a.active {{ background: #2a2f45; color: white; }}
+nav a {{ color: var(--fgd-text-muted); text-decoration: none; padding: 8px 12px;
+         border-radius: {design.BUTTON_RADIUS}; font-size: 14px; font-weight: 600; }}
+nav a:hover {{ background: var(--fgd-card); color: var(--fgd-text); }}
+nav a.active {{ background: var(--fgd-primary-soft); color: var(--fgd-text); }}
 main {{ padding: 24px; max-width: 960px; margin: 0 auto; }}
-.card {{ background: #1c2030; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }}
+footer {{ text-align: center; padding: 24px; font-size: 12px; color: var(--fgd-text-muted); }}
+.card {{ background: var(--fgd-card); border: 1px solid var(--fgd-border);
+         border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }}
 .grid-offers {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }}
-a.button, button.button {{ display: inline-block; background: #5865F2; color: white;
-            padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600;
-            border: none; font-size: 1rem; cursor: pointer; }}
-a.button.secondary, button.button.secondary {{ background: #2a2f45; }}
-a.button.danger, button.button.danger {{ background: #b3353f; }}
+a.button, button.button {{ display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            background: var(--fgd-primary); color: #ffffff; height: {design.BUTTON_HEIGHT};
+            padding: 0 {design.BUTTON_PADDING_X}; border-radius: {design.BUTTON_RADIUS};
+            text-decoration: none; font-weight: 600; font-size: 14px; border: none; cursor: pointer; }}
+a.button:hover, button.button:hover {{ background: var(--fgd-primary-hover); }}
+a.button:active, button.button:active {{ background: var(--fgd-primary-active); }}
+a.button.secondary, button.button.secondary {{ background: #232a3d; color: var(--fgd-text); }}
+a.button.secondary:hover, button.button.secondary:hover {{ background: #2a3149; }}
+a.button.danger, button.button.danger {{ background: var(--fgd-danger); }}
+a.button.danger:hover, button.button.danger:hover {{ background: var(--fgd-danger-hover); }}
+button.button:disabled, a.button.disabled {{ background: var(--fgd-surface);
+            color: var(--fgd-text-muted); cursor: not-allowed; }}
 table {{ width: 100%; border-collapse: collapse; }}
-td, th {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid #2a2f45; }}
-select, input[type=text] {{ background: #0f1117; color: #e6e6e6; border: 1px solid #2a2f45;
-          border-radius: 8px; padding: 8px; min-width: 200px; }}
+td, th {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--fgd-border); }}
+select, input[type=text] {{ background: var(--fgd-background); color: var(--fgd-text);
+          border: 1px solid var(--fgd-border); border-radius: 8px; padding: 8px; min-width: 200px; }}
 label.check {{ display: block; padding: 6px 0; }}
-.ok {{ color: #4ade80; }}
-.warn {{ color: #facc15; }}
-.muted {{ color: #8a8fa5; font-size: 0.9rem; }}
-.badge {{ display: inline-block; background: #2a2f45; border-radius: 6px; padding: 2px 8px;
-          font-size: 0.8rem; margin-right: 6px; }}
+.ok {{ color: var(--fgd-success); }}
+.warn {{ color: var(--fgd-warning); }}
+.urgent {{ color: var(--fgd-urgent); }}
+.critical {{ color: var(--fgd-critical); }}
+.muted {{ color: var(--fgd-text-muted); font-size: 13px; }}
+.badge {{ display: inline-block; background: var(--fgd-card); border: 1px solid var(--fgd-border);
+          color: var(--fgd-text); border-radius: 999px; padding: 2px 10px; font-size: 12px;
+          font-weight: 600; margin-right: 6px; text-decoration: none; }}
+a.badge:hover {{ border-color: var(--fgd-primary); }}
+a.badge.active {{ background: var(--fgd-primary-soft); border-color: var(--fgd-primary); color: #ffffff; }}
+.badge.free {{ background: var(--fgd-primary); border-color: var(--fgd-primary); color: #ffffff; }}
+.badge.new {{ color: var(--fgd-secondary); border-color: var(--fgd-secondary); }}
+.badge.ending {{ color: var(--fgd-urgent); border-color: var(--fgd-urgent); }}
+.badge.ended {{ color: var(--fgd-ended); border-color: var(--fgd-ended); }}
+.badge.platform-steam {{ color: var(--fgd-platform-steam); border-color: var(--fgd-platform-steam); }}
+.badge.platform-epic {{ color: var(--fgd-platform-epic); border-color: var(--fgd-platform-epic); }}
+.badge.platform-gog {{ color: var(--fgd-platform-gog); border-color: var(--fgd-platform-gog); }}
+.badge.platform-ubisoft {{ color: var(--fgd-platform-ubisoft); border-color: var(--fgd-platform-ubisoft); }}
+.offer-thumb {{ width: 100%; aspect-ratio: {design.IMAGE_RATIO}; object-fit: {design.IMAGE_FIT};
+          border-radius: {design.IMAGE_RADIUS}; background: var(--fgd-surface); display: block;
+          margin-bottom: 12px; }}
+.offer-badges {{ margin-bottom: 8px; }}
 .hero {{ text-align: center; padding: 48px 16px; }}
 .hero .button {{ margin: 8px; }}
 .guild-row {{ display: flex; align-items: center; gap: 12px; }}
 .guild-row img {{ width: 40px; height: 40px; border-radius: 50%; }}
 .guild-row .spacer {{ margin-left: auto; }}
 .filters a {{ margin-right: 8px; }}
-.notice {{ background: #1f3524; border: 1px solid #2f6b3c; border-radius: 8px;
-           padding: 10px 14px; margin-bottom: 16px; }}
+.notice {{ background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.35);
+           border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }}
 </style>
 </head>
 <body>
@@ -285,6 +322,7 @@ label.check {{ display: block; padding: 6px 0; }}
 <main>
 {body}
 </main>
+<footer>{html.escape(design.FOOTER)}</footer>
 </body>
 </html>"""
 
@@ -502,15 +540,16 @@ avec la commande <code>/setup-auto</code> sur Discord.</p>
 def render_offers(
     offers: list[dict], user: dict | None, selected_platform: str | None = None
 ) -> str:
-    filters = '<a class="badge" href="/offres">Toutes</a>' if selected_platform else (
-        '<a class="badge" href="/offres"><strong>Toutes</strong></a>'
+    filters = (
+        '<a class="badge active" href="/offres">Toutes</a>'
+        if not selected_platform
+        else '<a class="badge" href="/offres">Toutes</a>'
     )
     for key in config.PLATFORM_KEYS:
         platform = config.PLATFORMS[key]
         label = f"{platform.emoji} {html.escape(platform.name)}"
-        if key == selected_platform:
-            label = f"<strong>{label}</strong>"
-        filters += f'<a class="badge" href="/offres?plateforme={key}">{label}</a>'
+        css_class = f"badge platform-{key}" + (" active" if key == selected_platform else "")
+        filters += f'<a class="{css_class}" href="/offres?plateforme={key}">{label}</a>'
 
     if not offers:
         cards = '<div class="card"><p>Aucune offre connue pour ce filtre, reviens bientôt !</p></div>'
@@ -527,18 +566,33 @@ def render_offers(
                 else "<strong>GRATUIT</strong>"
             )
             end = parse_end_datetime(offer.get("end_date"))
-            if end is None:
-                remaining = '<span class="muted">Sans date de fin connue</span>'
-            elif end <= now:
-                remaining = '<span class="muted">⌛ Offre expirée</span>'
+            level = design.urgency_level(end, now=now)
+            if level == "unknown":
+                remaining = '<span class="muted">⏳ Sans date de fin connue</span>'
+                remaining_badge = ""
+            elif level == "ended":
+                remaining = '<span class="muted">⚫ Offre expirée</span>'
+                remaining_badge = '<span class="badge ended">EXPIRÉ</span>'
             else:
                 hours = (end - now).total_seconds() / 3600
                 if hours >= 48:
-                    remaining = f"⏳ {int(hours // 24)} jours restants"
+                    remaining_text = f"{int(hours // 24)} jours restants"
                 elif hours >= 24:
-                    remaining = "⏳ 1 jour restant"
+                    remaining_text = "1 jour restant"
                 else:
-                    remaining = f"⏳ {max(1, int(hours))} h restantes"
+                    remaining_text = f"{max(1, int(hours))} h restantes"
+                urgency_class = {"warning": "warn", "urgent": "urgent", "critical": "critical"}.get(
+                    level, "ok"
+                )
+                remaining = (
+                    f'{design.URGENCY_EMOJI[level]} <span class="{urgency_class}">'
+                    f"{html.escape(remaining_text)}</span>"
+                )
+                remaining_badge = (
+                    '<span class="badge ending">SE TERMINE BIENTÔT</span>'
+                    if level in {"urgent", "critical"}
+                    else ""
+                )
             link = str(
                 offer.get("open_giveaway_url")
                 or offer.get("claim_url")
@@ -546,16 +600,32 @@ def render_offers(
                 or offer.get("source_url")
                 or ""
             ).strip()
+            ended = level == "ended"
             button = (
-                f'<p><a class="button" href="{html.escape(link)}" rel="noopener noreferrer" '
-                'target="_blank">Récupérer</a></p>'
+                f'<p><a class="button{" secondary" if ended else ""}" '
+                f'href="{html.escape(link)}" rel="noopener noreferrer" target="_blank">'
+                f'{"🔗 Voir l’offre" if ended else "🎁 Récupérer le jeu"}</a></p>'
                 if link.startswith("http")
                 else ""
             )
+            thumbnail = str(offer.get("thumbnail") or "").strip()
+            image_html = (
+                f'<img class="offer-thumb" src="{html.escape(thumbnail)}" '
+                f'alt="{html.escape(str(offer.get("title") or ""))}" loading="lazy">'
+                if thumbnail.startswith("http")
+                else ""
+            )
+            platform_badge = (
+                f'<span class="badge platform-{key}">{emoji} '
+                f"{html.escape(platform_utils.display_name(key))}</span>"
+                if key is not None
+                else f'<span class="badge">{html.escape(emoji)}</span>'
+            )
             cards += f"""
 <div class="card">
-<h3>{emoji} {html.escape(str(offer.get('title') or ''))}</h3>
-<p class="muted">{html.escape(str(offer.get('platforms') or ''))}</p>
+{image_html}
+<h3>{html.escape(str(offer.get('title') or ''))}</h3>
+<p class="offer-badges"><span class="badge free">GRATUIT</span>{platform_badge}{remaining_badge}</p>
 <p>{worth_html}</p>
 <p>{remaining}</p>
 {button}

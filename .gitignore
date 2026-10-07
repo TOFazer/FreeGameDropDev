@@ -12,6 +12,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Prévisualisations locales (arena)
+.arena/
+
 # Éditeurs
 .idea/
 .vscode/

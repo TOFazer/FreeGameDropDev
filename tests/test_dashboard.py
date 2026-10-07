@@ -1,12 +1,14 @@
 """Tableau de bord web : pages publiques et connexion Discord (OAuth2)."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 import config
+from utils import design
 from web import dashboard, dashboard_server
 
 
@@ -30,6 +32,49 @@ async def test_page_daccueil_publique(client, db):
     text = await resp.text()
     assert "FreeGameDrop" in text
     assert "Se connecter avec Discord" in text
+
+
+async def test_page_daccueil_porte_lidentite_freegamedrop(client, db):
+    resp = await client.get("/")
+
+    text = await resp.text()
+    # thème sombre issu des tokens, police Inter, bouton principal de marque
+    assert f"--fgd-primary: {design.PRIMARY};" in text
+    assert f"--fgd-background: {design.BACKGROUND};" in text
+    assert "Inter" in text
+    assert "var(--fgd-primary)" in text
+    # branding discret en pied de page
+    assert design.FOOTER in text
+
+
+async def test_page_offres_affiche_les_offres_avec_lidentite(client, db):
+    fin = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    await db.save_giveaways(
+        [
+            {
+                "id": 1,
+                "title": "Super Jeu",
+                "platforms": "PC (Steam)",
+                "worth": "19.99€",
+                "end_date": fin,
+                "thumbnail": "https://example.com/jeu.jpg",
+                "open_giveaway_url": "https://example.com/jeu",
+                "source": "gamerpower",
+            }
+        ]
+    )
+
+    resp = await client.get("/offres")
+
+    assert resp.status == 200
+    text = await resp.text()
+    assert 'class="offer-thumb"' in text  # vignette 16:9, présentation cohérente
+    assert f"aspect-ratio: {design.IMAGE_RATIO}" in text
+    assert '<span class="badge free">GRATUIT</span>' in text  # badge principal
+    assert 'class="badge platform-steam"' in text  # badge plateforme, couleur Steam
+    assert "<s" in text and "GRATUIT" in text  # prix barré → gratuit
+    assert "🎁 Récupérer le jeu" in text  # CTA principal
+    assert "jours restants" in text  # échéance avec niveau d'urgence
 
 
 async def test_api_stats_json(client, db):

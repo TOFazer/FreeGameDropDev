@@ -17,7 +17,7 @@ from discord.ext import commands, tasks
 import config
 import database
 from services import offer_engine
-from utils import branding, metrics, monitoring, notifications, platforms, rate_limits
+from utils import branding, design, metrics, monitoring, notifications, platforms, rate_limits
 from utils.embeds import build_game_message, build_roles_embed, source_label
 from utils.logging_setup import log_event
 from utils.offers import filter_offers, normalize_genres, normalize_platforms
@@ -380,7 +380,9 @@ class GameBrowserView(discord.ui.View):
     def current_embed(self) -> discord.Embed:
         embed, _ = build_game_message(self.current_game)
         label = source_label(self.current_game)
-        embed.set_footer(text=f"Source : {label} • {self.page + 1}/{self.page_count}")
+        embed.set_footer(
+            text=f"{design.FOOTER} · Source : {label} · {self.page + 1}/{self.page_count}"
+        )
         return embed
 
     def _sync_components(self):

@@ -19,7 +19,7 @@ alertes qu'il veut recevoir** — plateforme par plateforme, en un clic.
 <!-- Une instance publique du bot est en ligne ? Remplace le lien ci-dessous par ton
      invitation Discord et décommente le bloc :
 <a href="https://discord.com/oauth2/authorize?client_id=TON_CLIENT_ID&permissions=268454928&scope=bot%20applications.commands">
-  <img src="https://img.shields.io/badge/➕_Ajouter_FreeGameDrop_à_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Ajouter FreeGameDrop à Discord">
+  <img src="https://img.shields.io/badge/➕_Ajouter_FreeGameDrop_à_Discord-7C3AED?style=for-the-badge&logo=discord&logoColor=white" alt="Ajouter FreeGameDrop à Discord">
 </a>
 -->
 
@@ -47,21 +47,26 @@ FreeGameDrop fait exactement ça — et rien d'autre :
 
 ## À quoi ça ressemble
 
-**Une annonce dans le salon d'une plateforme :**
+L'identité visuelle — couleurs, typographie, boutons, badges, embeds — est définie
+dans **[DESIGN.md](DESIGN.md)** (FreeGameDrop en trois mots : **Gaming — Moderne —
+Premium**, sous la marque mère Orvex).
+
+**Une annonce dans le salon d'une plateforme** (le filet de l'embed est toujours
+violet `#7C3AED`, quelle que soit la plateforme) :
 
 ```text
-🎁 NOUVEAU JEU GRATUIT
-⚪ Hogwarts Legacy
+🎁 JEU GRATUIT                          ← badge d'auteur
+⚪ Hogwarts Legacy                      ← le nom du jeu, rien d'autre
 Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 
-   💰 Prix                    ⏳ Fin de l'offre
-   ~~59,99 €~~ ➜ GRATUIT      dans 2 jours (lun. 6 oct. 23:59)
+   💰 Prix                 🎮 Plateforme        ⏰ Fin de l'offre
+   ~~59,99 €~~ ➜ GRATUIT   ⚪ Epic Games Store  🟡 dans 22 h (mar. 7 oct. …)
 
-   🖥️ Plateformes
-   Epic Games Store
-
-[ 🎁 Récupérer le jeu ]   [ ➕ Ajouter FreeGameDrop ]
+[ 🎁 Récupérer le jeu ]   [ ➕ Ajouter FreeGameDrop ]   ← pied : 🎁 FreeGameDrop · par Orvex
 ```
+
+**L'urgence se lit en un coup d'œil** : 🟢 plus de 24 h · 🟡 moins de 24 h ·
+🟠 moins de 6 h (« 🔥 SE TERMINE BIENTÔT ») · 🔴 moins d'1 h.
 
 **Le gros jeu du jour passe en « offre exceptionnelle » :**
 
@@ -69,8 +74,8 @@ Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 🔥 OFFRE EXCEPTIONNELLE
 🔵 Cyberpunk 2077
 
-   💰 Prix                    ⏳ Fin de l'offre
-   ~~59,99 €~~ ➜ GRATUIT      dans 23 heures
+   💰 Prix                 🎮 Plateforme   ⏰ Fin de l'offre
+   ~~59,99 €~~ ➜ GRATUIT   🔵 Steam        🟡 dans 23 heures
 
    🔥 Offre exceptionnelle
    Jeu complet d'une valeur de 59,99 €, offert pour une durée limitée.
@@ -92,11 +97,10 @@ Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 **Le navigateur `/free`, en éphémère, avec boutons de pagination et favori :**
 
 ```text
-🎮 Jeux gratuits du moment (1/3)
-🔵 Super Jeu
-~~19,99 €~~ ➜ GRATUIT • se termine dans 3 jours
+🎁 JEU GRATUIT · 🔵 Super Jeu
+~~19,99 €~~ ➜ GRATUIT • 🔵 Steam • 🟢 dans 3 jours
 
-[ ◀️ ]  [ ❤️ Retirer des favoris ]  [ ▶️ ]  [ 🎁 Récupérer ]
+[ ◀️ ]  [ ❤️ Retirer des favoris ]  [ ▶️ ]  [ 🎁 Récupérer le jeu ]
 ```
 
 ---
@@ -549,16 +553,18 @@ Les mots-clés sont cherchés en minuscules dans le champ `platforms` renvoyé p
 main.py                 point d'entrée : démarre le bot, les cogs et le tableau de bord optionnel
 config.py               toute la configuration (.env, plateformes, sources, alertes, dashboard)
 database.py             stockage SQLite (configuration, annonces, catalogue, favoris, alertes, sessions)
+DESIGN.md               livre de marque : identité visuelle FreeGameDrop (couleurs, typo, embeds)
+ROADMAP.md              feuille de route des prochaines versions
 cogs/
   jeux.py               commandes, menus, navigation des offres, boucle de vérification
   setup.py              /ping, /info et /stats
   sante.py              /sante et boucle d'alertes de surveillance
-ROADMAP.md              feuille de route des prochaines versions
 services/
   gamerpower.py         appel à l'API GamerPower (et rien d'autre)
   epic_games.py          appel à l'API de l'Epic Games Store (et rien d'autre)
   offer_engine.py        agrège les sources, tolère les pannes, dédoublonne
 utils/
+  design.py             design tokens de l'identité visuelle (couleurs, urgence, typo, boutons)
   platforms.py          reconnaître la plateforme d'un jeu
   offers.py             filtres de catalogue, préférences, offres exceptionnelles
   embeds.py             construire les messages Discord
