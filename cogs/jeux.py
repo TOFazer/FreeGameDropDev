@@ -7,6 +7,7 @@ Ce cog ne contient que la logique Discord : les messages sont construits dans
 
 import logging
 import math
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
@@ -15,9 +16,9 @@ from discord.ext import commands, tasks
 import config
 import database
 from services import offer_engine
-from utils import metrics, notifications, platforms
+from utils import branding, metrics, notifications, platforms
 from utils.embeds import build_game_message, build_roles_embed, source_label
-from utils.offers import filter_offers, normalize_genres
+from utils.offers import filter_offers, normalize_genres, normalize_platforms
 from utils.permissions import (
     admin_note,
     category_overwrites,
@@ -698,14 +699,16 @@ class Jeux(commands.Cog):
         response = await offer_engine.fetch_offers()
         games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
         await database.save_giveaways(games)
+        await database.set_bot_state("last_check_at", datetime.now(timezone.utc).isoformat())
         routes = await database.get_routes()
         roles = await database.get_all_platform_roles()
         mentions = discord.AllowedMentions(roles=True)
+        invite_url = branding.build_invite_url(self.bot.user.id) if self.bot.user else None
         new_games = []
         sent = 0
         for game in games[: config.MAX_GAMES]:
             item_id = str(game.get("id"))
-            embed, view = build_game_message(game)
+            embed, view = build_game_message(game, invite_url=invite_url)
             announced_anywhere = False
             for guild_id, route, channel_id, _ in routes:
                 if not platforms.matches(game, [route]):
@@ -940,6 +943,7 @@ class Jeux(commands.Cog):
         types="Types d'offres séparés par une virgule (ex : game,dlc)",
         prix_min="Ignore les offres valant moins que ce prix, en euros",
         genres="Genres séparés par une virgule (ex : rpg,action)",
+        plateformes="Plateformes séparées par une virgule (ex : steam,epic,gog,ubisoft) ; vide = toutes",
         fuseau="Fuseau horaire IANA (ex : Europe/Paris), vide pour revenir au défaut",
     )
     async def preferences(
@@ -948,6 +952,7 @@ class Jeux(commands.Cog):
         types: str | None = None,
         prix_min: float | None = None,
         genres: str | None = None,
+        plateformes: str | None = None,
         fuseau: str | None = None,
     ):
         current = await database.get_user_preferences(interaction.user.id)
@@ -957,20 +962,30 @@ class Jeux(commands.Cog):
             else current["offer_types"]
         )
         new_genres = normalize_genres(genres.split(",")) if genres is not None else current["genres"]
+        new_platforms = (
+            normalize_platforms(plateformes.split(","))
+            if plateformes is not None
+            else current["platforms"]
+        )
 
         await database.set_user_preferences(
             interaction.user.id,
             offer_types=offer_types or ["game"],
             min_worth_eur=prix_min if prix_min is not None else current["min_worth_eur"],
             genres=new_genres,
+            platforms=new_platforms,
             timezone=fuseau if fuseau is not None else current["timezone"],
         )
         saved = await database.get_user_preferences(interaction.user.id)
         types_label = ", ".join(config.OFFER_TYPE_LABELS.get(t, t) for t in saved["offer_types"]) or "—"
         genres_label = ", ".join(config.GENRE_LABELS.get(g, g) for g in saved["genres"]) or "tous"
+        platforms_label = (
+            ", ".join(platforms.display_name(p) for p in saved["platforms"]) or "toutes"
+        )
         await interaction.response.send_message(
             "✅ Préférences enregistrées.\n"
             f"Types : **{types_label}**\n"
+            f"Plateformes : **{platforms_label}**\n"
             f"Prix minimum : **{saved['min_worth_eur'] if saved['min_worth_eur'] is not None else '—'} €**\n"
             f"Genres : **{genres_label}**\n"
             f"Fuseau horaire : **{saved['timezone'] or config.DEFAULT_TIMEZONE} (défaut)**",

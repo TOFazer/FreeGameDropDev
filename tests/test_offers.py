@@ -103,3 +103,77 @@ def test_filtre_catalogue_se_termine_bientot():
     resultat = offers.filter_offers(jeux, period="ending_soon", now=now)
 
     assert [j["id"] for j in resultat] == [1]
+
+
+# ---------- Préférences de plateforme ----------
+
+
+def test_normalisation_des_plateformes():
+    assert offers.normalize_platforms(["steam", "epic"]) == ["steam", "epic"]
+    assert offers.normalize_platforms("gog") == ["gog"]
+    assert offers.normalize_platforms(["Steam", " EPIC ", "xbox"]) == ["steam", "epic"]
+    assert offers.normalize_platforms([]) == []
+    assert offers.normalize_platforms(None) == []
+
+
+def test_preferences_sans_plateforme_laissent_tout_passer():
+    jeu_epic = {"platforms": "Epic Games Store", "offer_type": "game"}
+    preferences = {"offer_types": ["game"], "platforms": []}
+
+    assert offers.offer_matches_preferences(jeu_epic, preferences) is True
+
+
+def test_preferences_de_plateforme_filtrent_les_alertes():
+    jeu_epic = {"platforms": "Epic Games Store", "offer_type": "game"}
+    jeu_steam = {"platforms": "PC (Steam)", "offer_type": "game"}
+    jeu_inconnu = {"platforms": "itch.io", "offer_type": "game"}
+    preferences = {"offer_types": ["game"], "platforms": ["steam"]}
+
+    assert offers.offer_matches_preferences(jeu_steam, preferences) is True
+    assert offers.offer_matches_preferences(jeu_epic, preferences) is False
+    assert offers.offer_matches_preferences(jeu_inconnu, preferences) is False
+
+
+# ---------- Offres exceptionnelles ----------
+
+
+def _jeu_mega(**overrides):
+    jeu = {
+        "offer_type": "game",
+        "worth": "59,99 €",
+        "end_date": (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+        "platforms": "Epic Games Store",
+    }
+    jeu.update(overrides)
+    return jeu
+
+
+def test_mega_deal_reconnu_sur_une_grande_valeur():
+    assert offers.is_mega_deal(_jeu_mega()) is True
+
+
+def test_mega_deal_refuse_les_petites_valeurs():
+    assert offers.is_mega_deal(_jeu_mega(worth="9,99 €")) is False
+
+
+def test_mega_deal_refuse_les_valeurs_hors_euros():
+    # 59,99 $ n'est pas converti ni estimé : aucune devise inventée.
+    assert offers.is_mega_deal(_jeu_mega(worth="$59.99")) is False
+
+
+def test_mega_deal_refuse_les_dlc_et_contenus():
+    assert offers.is_mega_deal(_jeu_mega(offer_type="dlc")) is False
+    assert offers.is_mega_deal(_jeu_mega(offer_type="content")) is False
+
+
+def test_mega_deal_exige_une_offre_temporaire_encore_en_cours():
+    assert offers.is_mega_deal(_jeu_mega(end_date="")) is False
+    hier = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    assert offers.is_mega_deal(_jeu_mega(end_date=hier)) is False
+
+
+def test_mega_deal_desactivable_par_configuration(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "MEGA_DEAL_MIN_WORTH_EUR", 0)
+    assert offers.is_mega_deal(_jeu_mega()) is False

@@ -88,3 +88,60 @@ def test_panneau_des_roles_precise_la_lecture_seule():
     embed = embeds.build_roles_embed()
 
     assert "lecture seule" in embed.footer.text
+
+
+# ---------- Offres exceptionnelles, branding, invitation ----------
+
+
+from datetime import timedelta  # noqa: E402
+
+from utils import branding  # noqa: E402
+
+
+def _jeu_exceptionnel(**overrides):
+    jeu = dict(
+        JEU,
+        worth="59,99 €",
+        end_date=(datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    jeu.update(overrides)
+    return jeu
+
+
+def test_annonce_standard_reste_sobre():
+    embed, _ = embeds.build_game_message(JEU)  # « 19.99 » sans euros : pas exceptionnel
+
+    assert embed.author.name == "🎁 NOUVEAU JEU GRATUIT"
+    assert embed.footer.text == "🎁 FreeGameDrop • Source : GamerPower"
+    assert all("exceptionnelle" not in (f.name or "").lower() for f in embed.fields)
+
+
+def test_annonce_exceptionnelle_est_mise_en_avant():
+    embed, _ = embeds.build_game_message(_jeu_exceptionnel())
+
+    assert embed.author.name == "🔥 OFFRE EXCEPTIONNELLE"
+    assert any("🔥 Offre exceptionnelle" in (f.name or "") for f in embed.fields)
+    assert "59.99 €" in " ".join(f.value for f in embed.fields)
+
+
+def test_bouton_ajout_freegamedrop_avec_lien_invitation():
+    invite = branding.build_invite_url(999)
+    embed, view = embeds.build_game_message(JEU, invite_url=invite)
+
+    urls = [child.url for child in view.children]
+    assert JEU["open_giveaway_url"] in urls
+    assert invite in urls
+    assert len(view.children) == 2
+
+
+def test_sans_lien_dinvitation_pas_de_bouton_en_plus():
+    _, view = embeds.build_game_message(JEU)
+
+    assert len(view.children) == 1  # seulement « Récupérer le jeu »
+
+
+def test_panneau_des_roles_est_brande_freegamedrop():
+    embed = embeds.build_roles_embed()
+
+    assert "FreeGameDrop" in embed.title
+    assert "FreeGameDrop" in embed.footer.text

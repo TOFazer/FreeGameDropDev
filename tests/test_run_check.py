@@ -111,3 +111,27 @@ async def test_salon_supprime_a_la_main(cog, serveur_configure, guild):
 class _Response:
     status = 500
     reason = "Server Error"
+
+
+async def test_la_verification_est_horodatee(cog, serveur_configure, db):
+    await serveur_configure([STEAM])
+
+    await cog.run_check()
+
+    horodatage = await db.get_bot_state("last_check_at")
+    assert horodatage is not None
+    from datetime import datetime, timezone
+
+    instant = datetime.fromisoformat(horodatage)
+    assert abs((datetime.now(timezone.utc) - instant).total_seconds()) < 60
+
+
+async def test_annonce_comporte_le_bouton_dinvitation(cog, serveur_configure):
+    salons = await serveur_configure([STEAM])
+
+    await cog.run_check()
+
+    kwargs = salons["steam"].sent[0]
+    urls = [child.url for child in kwargs["view"].children]
+    assert any("oauth2/authorize" in url and "client_id=999" in url for url in urls)
+    assert kwargs["embed"].footer.text.startswith("🎁 FreeGameDrop")

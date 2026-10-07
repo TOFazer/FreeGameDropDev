@@ -51,12 +51,29 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
   plateforme, vérification des permissions du bot, vitrine publique des offres (`/offres`),
   alertes personnelles et page « Compte » avec suppression des données.
 
+## Livré — V2.1 : plateformes dans les préférences, offres exceptionnelles, stats publiques
+
+- `/preferences` accepte désormais un filtre par **plateformes** (`steam,epic,gog,ubisoft` ;
+  vide = toutes) : `/free`, les favoris et les alertes DM n'affichent plus que les plateformes choisies.
+- **Offres exceptionnelles** : un jeu complet, temporaire et dont la valeur explicitement
+  libellée en euros atteint `MEGA_DEAL_MIN_WORTH_EUR` est annoncé avec le bandeau
+  « 🔥 OFFRE EXCEPTIONNELLE » et le détail chiffré. Aucune conversion ni estimation : une valeur
+  en dollars, par exemple, ne déclenche jamais le bandeau.
+- `/stats` : statistiques publiques (offres détectées, offres actives, valeur cumulée connue en
+  euros, plateformes suivies, sources, serveurs, dernière vérification) — uniquement des valeurs
+  réellement mesurées par le bot.
+- Branding et boucle virale : pied de page « 🎁 FreeGameDrop » sur les annonces et le panneau des
+  rôles, bouton « ➕ Ajouter FreeGameDrop » construit dynamiquement sur chaque annonce (fonctionne
+  pour toute instance auto-hébergée, sans configuration).
+- `Dockerfile` et `.dockerignore` pour l'hébergement continu (PaaS, serveur perso).
+- Licence MIT.
+
 ## Prochains lots
 
 ### V2 — compléments
 
 1. Digest quotidien activable par serveur, puis récapitulatif hebdomadaire.
-2. Offres « Mega Deal » à partir d'un seuil de valeur configuré côté serveur (en plus du seuil personnel déjà disponible via `/preferences`).
+2. ~~Offres « Mega Deal » à partir d'un seuil de valeur configuré côté serveur (en plus du seuil personnel déjà disponible via `/preferences`).~~ Livré en V2.1 côté annonce (`MEGA_DEAL_MIN_WORTH_EUR`) ; reste à rendre le seuil configurable par serveur.
 3. Modèles d'annonces configurables, commande de test sans fausse annonce dans les statistiques, et salon de logs facultatif.
 4. File d'envoi et limitation de débit pour respecter les limites Discord à grande échelle.
 

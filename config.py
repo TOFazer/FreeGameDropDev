@@ -52,9 +52,7 @@ TEST_GUILD_ID: int | None = _env_int("TEST_GUILD_ID", 1391429196105912452) or No
 LOG_LEVEL: str = _env_str("LOG_LEVEL", "INFO").upper()
 
 # Liens affichés dans la commande /info.
-PROJECT_URL: str = _env_str(
-    "PROJECT_URL", "https://github.com/TOFazer/release-bot-FreeGameDrop"
-)
+PROJECT_URL: str = _env_str("PROJECT_URL", "https://github.com/TOFazer/freegamedrop")
 SUPPORT_URL: str = _env_str("SUPPORT_URL", f"{PROJECT_URL}/issues")
 VOTE_URL: str = _env_str("VOTE_URL")
 
@@ -146,6 +144,15 @@ ALERT_CADENCE_HOURS: float = _env_float("ALERT_CADENCE_HOURS", 1.0)
 # Fenêtre considérée comme « se termine bientôt » pour les alertes et /free.
 LAST_DAY_HOURS: float = _env_float("LAST_DAY_HOURS", 24.0)
 LAST_HOURS_THRESHOLD: float = _env_float("LAST_HOURS_THRESHOLD", 6.0)
+
+
+# ---------- Offres exceptionnelles ----------
+
+# Une offre est mise en avant « 🔥 Offre exceptionnelle » quand c'est un jeu complet,
+# temporaire, et dont la valeur explicitement libellée en euros atteint ce seuil.
+# Les valeurs non libellées en euros ne comptent jamais : rien n'est inventé.
+# Mettre 0 pour désactiver la mise en avant.
+MEGA_DEAL_MIN_WORTH_EUR: float = _env_float("MEGA_DEAL_MIN_WORTH_EUR", 19.99)
 
 
 # ---------- Salons créés par /setup-auto ----------

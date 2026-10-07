@@ -89,10 +89,21 @@ async def test_statistiques_globales(db):
 
 async def test_preferences_par_defaut_puis_personnalisees(db):
     defaults = await db.get_user_preferences(42)
-    assert defaults == {"offer_types": ["game"], "min_worth_eur": None, "genres": [], "timezone": ""}
+    assert defaults == {
+        "offer_types": ["game"],
+        "min_worth_eur": None,
+        "genres": [],
+        "timezone": "",
+        "platforms": [],
+    }
 
     await db.set_user_preferences(
-        42, offer_types=["game", "dlc"], min_worth_eur=10.0, genres=["rpg"], timezone="Europe/Paris"
+        42,
+        offer_types=["game", "dlc"],
+        min_worth_eur=10.0,
+        genres=["rpg"],
+        timezone="Europe/Paris",
+        platforms=["steam", "epic"],
     )
 
     preferences = await db.get_user_preferences(42)
@@ -101,7 +112,17 @@ async def test_preferences_par_defaut_puis_personnalisees(db):
         "min_worth_eur": 10.0,
         "genres": ["rpg"],
         "timezone": "Europe/Paris",
+        "platforms": ["steam", "epic"],
     }
+
+
+async def test_preferences_plateformes_vides_retiennent_toutes_les_offres(db):
+    """Une liste vide signifie « toutes les plateformes », comme pour les genres."""
+
+    await db.set_user_preferences(42, offer_types=["game"], platforms=[])
+
+    preferences = await db.get_user_preferences(42)
+    assert preferences["platforms"] == []
 
 
 async def test_notifications_personnelles(db):

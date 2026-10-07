@@ -37,6 +37,7 @@ async def test_les_commandes_sont_enregistrees(bot_discord):
         "reset-all",
         "reset-jeux",
         "setup-auto",
+        "stats",
         "test-jeux",
     ]
 
