@@ -1,4 +1,4 @@
-"""Commandes générales du bot : ping et informations publiques."""
+"""Commandes générales du bot : ping, informations publiques et statistiques."""
 
 import math
 
@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
+from utils import branding, metrics
 
 
 def build_info_embed(bot: commands.Bot) -> discord.Embed:
@@ -24,21 +25,7 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
 
     links = []
     if bot.user is not None:
-        permissions = discord.Permissions(
-            manage_channels=True,
-            manage_roles=True,
-            view_channel=True,
-            read_message_history=True,
-            send_messages=True,
-            embed_links=True,
-            manage_messages=True,
-        ).value
-        invite_url = (
-            "https://discord.com/oauth2/authorize?"
-            f"client_id={bot.user.id}&permissions={permissions}"
-            "&scope=bot%20applications.commands"
-        )
-        links.append(f"[Ajouter le bot]({invite_url})")
+        links.append(f"[Ajouter le bot]({branding.build_invite_url(bot.user.id)})")
     if config.PROJECT_URL:
         links.append(f"[Projet]({config.PROJECT_URL})")
     if config.SUPPORT_URL:
@@ -50,6 +37,38 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
         name="Liens utiles", value=" · ".join(links) or "Aucun lien configuré.", inline=False
     )
     embed.set_footer(text="FreeGameDrop • Merci de faire partie de la communauté !")
+    return embed
+
+
+def build_stats_embed(bot: commands.Bot, stats: dict) -> discord.Embed:
+    """Construit la fiche /stats : uniquement des chiffres réellement mesurés."""
+    sources = ", ".join(stats.get("sources") or []) or "—"
+    last_check = metrics.format_last_check(stats.get("last_check_at"))
+
+    embed = discord.Embed(
+        title="📊 FreeGameDrop en chiffres",
+        description="Tout ce qui suit provient des vérifications réellement effectuées par le bot.",
+        colour=discord.Colour.blurple(),
+    )
+    if bot.user is not None:
+        embed.url = branding.build_invite_url(bot.user.id)
+    embed.add_field(name="🎮 Offres détectées", value=f"{stats.get('total_offers', 0):,}", inline=True)
+    embed.add_field(name="🟢 Offres actives", value=f"{stats.get('active_offers', 0):,}", inline=True)
+    embed.add_field(
+        name="🆕 Ce mois-ci", value=f"{stats.get('offers_last_30_days', 0):,}", inline=True
+    )
+    embed.add_field(
+        name="💰 Valeur connue",
+        value=f"{stats.get('known_value_eur', 0):,.2f} €\n*(offres libellées en euros)*",
+        inline=True,
+    )
+    embed.add_field(
+        name="🏪 Plateformes suivies", value=f"{stats.get('platforms_watched', 0):,}", inline=True
+    )
+    embed.add_field(name="🛰️ Sources", value=sources, inline=True)
+    embed.add_field(name="🏠 Serveurs", value=f"{stats.get('guilds', 0):,}", inline=True)
+    embed.add_field(name="⏱️ Dernière vérification", value=last_check, inline=True)
+    embed.set_footer(text="FreeGameDrop • Ajoute le bot à ton serveur depuis le titre !")
     return embed
 
 
@@ -65,6 +84,15 @@ class Setup(commands.Cog):
     @app_commands.command(name="info", description="Affiche la latence, les serveurs et les liens utiles")
     async def info(self, interaction: discord.Interaction):
         await interaction.response.send_message(embed=build_info_embed(self.bot), ephemeral=True)
+
+    @app_commands.command(
+        name="stats", description="Les chiffres du bot : offres détectées, actives, valeur connue"
+    )
+    async def stats(self, interaction: discord.Interaction):
+        stats = await metrics.build_public_stats(self.bot)
+        await interaction.response.send_message(
+            embed=build_stats_embed(self.bot, stats), allowed_mentions=discord.AllowedMentions.none()
+        )
 
 
 async def setup(bot: commands.Bot):

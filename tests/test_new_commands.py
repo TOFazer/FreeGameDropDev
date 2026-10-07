@@ -84,29 +84,62 @@ async def test_preferences_par_defaut_puis_mises_a_jour(db):
     interaction = FakeInteraction()
 
     await Jeux.preferences.callback(
-        _cog(), interaction, types="game,dlc", prix_min=15.0, genres="rpg,action", fuseau="Europe/Paris"
+        _cog(),
+        interaction,
+        types="game,dlc",
+        prix_min=15.0,
+        genres="rpg,action",
+        plateformes="steam,epic",
+        fuseau="Europe/Paris",
     )
 
     saved = await db.get_user_preferences(42)
     assert saved["offer_types"] == ["game", "dlc"]
     assert saved["min_worth_eur"] == 15.0
     assert sorted(saved["genres"]) == ["action", "rpg"]
+    assert saved["platforms"] == ["steam", "epic"]
     assert saved["timezone"] == "Europe/Paris"
     args, kwargs = interaction.response.sent
     assert "Préférences enregistrées" in args[0]
+    assert "Steam" in args[0] and "Epic Games Store" in args[0]
     assert kwargs["ephemeral"] is True
 
 
+async def test_preferences_plateformes_vider_revient_a_toutes(db):
+    interaction = FakeInteraction()
+    await db.set_user_preferences(42, offer_types=["game"], platforms=["steam"])
+
+    await Jeux.preferences.callback(
+        _cog(), interaction, types=None, prix_min=None, genres=None, plateformes="", fuseau=None
+    )
+
+    saved = await db.get_user_preferences(42)
+    assert saved["platforms"] == []
+    args, _ = interaction.response.sent
+    assert "toutes" in args[0]
+
+
 async def test_preferences_partielles_conservent_le_reste(db):
-    await db.set_user_preferences(42, offer_types=["game"], min_worth_eur=5.0, genres=["rpg"])
+    await db.set_user_preferences(
+        42, offer_types=["game"], min_worth_eur=5.0, genres=["rpg"], platforms=["gog"]
+    )
     interaction = FakeInteraction()
 
-    await Jeux.preferences.callback(_cog(), interaction, types=None, prix_min=None, genres=None, fuseau=None)
+    await Jeux.preferences.callback(
+        _cog(),
+        interaction,
+        types=None,
+        prix_min=None,
+        genres=None,
+        plateformes=None,
+        fuseau=None,
+    )
 
     saved = await db.get_user_preferences(42)
     assert saved["offer_types"] == ["game"]
     assert saved["min_worth_eur"] == 5.0
     assert saved["genres"] == ["rpg"]
+    assert saved["platforms"] == ["gog"]
 
 
 async def test_alertes_active_puis_desactive(db):

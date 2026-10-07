@@ -90,7 +90,8 @@ async def init_db():
                 offer_types TEXT NOT NULL DEFAULT 'game',
                 min_worth_eur REAL,
                 genres TEXT NOT NULL DEFAULT '',
-                timezone TEXT NOT NULL DEFAULT ''
+                timezone TEXT NOT NULL DEFAULT '',
+                platforms TEXT NOT NULL DEFAULT ''
             )"""
         )
         # Alertes personnelles (DM) qu'un membre a activées, indépendamment du serveur.
@@ -119,6 +120,14 @@ async def init_db():
                 channel_id INTEGER NOT NULL
             )"""
         )
+        # État interne du bot (par exemple la date de la dernière vérification),
+        # utilisé uniquement pour des informations réellement mesurées.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS bot_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )"""
+        )
         # Sessions du tableau de bord web, créées après l'authentification Discord OAuth2.
         await db.execute(
             """CREATE TABLE IF NOT EXISTS dashboard_sessions (
@@ -132,6 +141,10 @@ async def init_db():
         )
         try:
             await db.execute("ALTER TABLE guilds ADD COLUMN platforms TEXT")
+        except aiosqlite.OperationalError:
+            pass  # la colonne existe déjà
+        try:
+            await db.execute("ALTER TABLE user_preferences ADD COLUMN platforms TEXT NOT NULL DEFAULT ''")
         except aiosqlite.OperationalError:
             pass  # la colonne existe déjà
         for column, definition in (
@@ -604,6 +617,35 @@ async def get_giveaway_stats() -> dict:
     }
 
 
+async def get_offer_rows_for_stats() -> list[tuple[str, str]]:
+    """(end_date, worth) de chaque offre du catalogue, pour les statistiques publiques.
+
+    Seules des valeurs réellement enregistrées sont renvoyées : aucun calcul, aucune
+    estimation — l'interprétation (offre active, valeur en euros) est faite par l'appelant.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT end_date, worth FROM giveaway_items") as cursor:
+            return [(end_date or "", worth or "") for end_date, worth in await cursor.fetchall()]
+
+
+async def set_bot_state(key: str, value: str) -> None:
+    """Mémorise un état interne du bot (ex. date de la dernière vérification)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO bot_state (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (key, value),
+        )
+        await db.commit()
+
+
+async def get_bot_state(key: str) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT value FROM bot_state WHERE key = ?", (key,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
 # ---------- Préférences personnelles ----------
 
 
@@ -614,19 +656,23 @@ async def set_user_preferences(
     min_worth_eur: float | None = None,
     genres: list[str] | None = None,
     timezone: str | None = None,
+    platforms: list[str] | None = None,
 ) -> None:
     offer_types_text = ",".join(offer_types) if offer_types else "game"
     genres_text = ",".join(genres) if genres else ""
+    platforms_text = ",".join(platforms) if platforms else ""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            """INSERT INTO user_preferences (user_id, offer_types, min_worth_eur, genres, timezone)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO user_preferences
+                   (user_id, offer_types, min_worth_eur, genres, timezone, platforms)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                    offer_types = excluded.offer_types,
                    min_worth_eur = excluded.min_worth_eur,
                    genres = excluded.genres,
-                   timezone = excluded.timezone""",
-            (user_id, offer_types_text, min_worth_eur, genres_text, timezone or ""),
+                   timezone = excluded.timezone,
+                   platforms = excluded.platforms""",
+            (user_id, offer_types_text, min_worth_eur, genres_text, timezone or "", platforms_text),
         )
         await db.commit()
 
@@ -635,20 +681,28 @@ async def get_user_preferences(user_id: int) -> dict:
     """Préférences d'un membre, avec des valeurs par défaut sûres si aucune n'est enregistrée."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT offer_types, min_worth_eur, genres, timezone FROM user_preferences WHERE user_id = ?",
+            """SELECT offer_types, min_worth_eur, genres, timezone, platforms
+               FROM user_preferences WHERE user_id = ?""",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
 
     if row is None:
-        return {"offer_types": ["game"], "min_worth_eur": None, "genres": [], "timezone": ""}
+        return {
+            "offer_types": ["game"],
+            "min_worth_eur": None,
+            "genres": [],
+            "timezone": "",
+            "platforms": [],
+        }
 
-    offer_types, min_worth_eur, genres, timezone = row
+    offer_types, min_worth_eur, genres, timezone, platforms = row
     return {
         "offer_types": [t for t in (offer_types or "game").split(",") if t],
         "min_worth_eur": min_worth_eur,
         "genres": [g for g in (genres or "").split(",") if g],
         "timezone": timezone or "",
+        "platforms": [p for p in (platforms or "").split(",") if p],
     }
 
 

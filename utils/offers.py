@@ -110,16 +110,50 @@ def offer_matches_genres(game: dict, selected_genres) -> bool:
     return bool(set(normalize_genres(game.get("genres"))).intersection(selected))
 
 
+def normalize_platforms(values) -> list[str]:
+    """Ne garde que les clés de plateformes suivies par le bot (steam, epic, gog, ubisoft)."""
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    return [key for key in platforms.PLATFORM_KEYS if key in {str(v).strip().casefold() for v in values}]
+
+
 def offer_matches_preferences(game: dict, preferences: dict) -> bool:
-    """Applique les préférences personnelles de type, de valeur et de genres vérifiés."""
+    """Applique les préférences personnelles de type, plateforme, valeur et genres vérifiés."""
     if not offer_matches_type(game, preferences.get("offer_types", ["game"])):
         return False
+    selected_platforms = normalize_platforms(preferences.get("platforms"))
+    if selected_platforms:
+        if platforms.detect_platform(game) not in selected_platforms:
+            return False
     minimum = preferences.get("min_worth_eur")
     if minimum is not None:
         worth = parse_worth_eur(game.get("worth"))
         if worth is None or worth < float(minimum):
             return False
     return offer_matches_genres(game, preferences.get("genres", []))
+
+
+def is_mega_deal(game: dict, now: datetime | None = None) -> bool:
+    """Une offre « exceptionnelle » est un jeu complet, temporaire et de grande valeur.
+
+    Seuls des champs réellement fournis par les sources décident : la valeur doit être
+    explicitement libellée en euros (aucune conversion inventée), l'offre doit avoir une
+    date de fin encore future, et il doit s'agir d'un jeu complet (pas un DLC ni un loot).
+    """
+    if config.MEGA_DEAL_MIN_WORTH_EUR <= 0:
+        return False
+    if str(game.get("offer_type") or "game") != "game":
+        return False
+    worth = parse_worth_eur(game.get("worth"))
+    if worth is None or worth < config.MEGA_DEAL_MIN_WORTH_EUR:
+        return False
+    end = parse_end_datetime(game.get("end_date"))
+    if end is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return end > now
 
 
 def filter_offers(
