@@ -47,7 +47,17 @@ BOT_ALLOW = (
     "send_messages",
     "embed_links",
     "attach_files",
-    "manage_messages",  # pour nettoyer le salon des rôles
+    "manage_messages",  # facultatif : modération des messages dans le salon des rôles
+)
+
+# Permissions réellement requises pour créer la configuration et envoyer les annonces.
+# Lire l'historique et gérer les messages restent des options de modération, pas un prérequis.
+SETUP_REQUIRED = (
+    ("manage_channels", "Gérer les salons"),
+    ("manage_roles", "Gérer les rôles"),
+    ("view_channel", "Voir les salons"),
+    ("send_messages", "Envoyer des messages"),
+    ("embed_links", "Intégrer des liens"),
 )
 
 
@@ -60,6 +70,11 @@ def overwrite(**flags) -> discord.PermissionOverwrite:
 def bot_can(guild: discord.Guild, name: str) -> bool:
     """Le bot possède-t-il cette permission sur le serveur ?"""
     return bool(getattr(guild.me.guild_permissions, name, False))
+
+
+def missing_setup_permissions(guild: discord.Guild) -> list[str]:
+    """Permissions Discord indispensables à la configuration et aux annonces."""
+    return [label for name, label in SETUP_REQUIRED if not bot_can(guild, name)]
 
 
 def _denied(guild: discord.Guild) -> dict:
@@ -99,6 +114,14 @@ def game_channel_overwrites(guild: discord.Guild, role: discord.Role) -> dict:
     }
 
 
+def inactive_game_channel_overwrites(guild: discord.Guild) -> dict:
+    """Cache un salon désactivé tout en laissant le bot le réparer plus tard."""
+    return {
+        guild.default_role: hidden_overwrite(guild),
+        guild.me: bot_overwrite(guild),
+    }
+
+
 def clean_access_roles(guild: discord.Guild, roles: Iterable | None) -> list:
     """Garde les rôles réellement utilisables ; @everyone revient à « tout le monde »."""
     cleaned = []
@@ -133,13 +156,13 @@ def describe_access(access_roles: Iterable | None) -> str:
 
 
 def admin_note(guild: discord.Guild) -> str:
-    """Les permissions de salon ne bloquent pas les admins : on dit comment c'est géré."""
+    """Précise le comportement des administrateurs sans rendre la modération obligatoire."""
     if bot_can(guild, "manage_messages"):
         return (
-            "\nℹ️ Les admins passent outre les permissions Discord : "
-            "leurs messages y sont supprimés automatiquement."
+            "\nℹ️ Discord autorise toujours les administrateurs à écrire dans les salons ; "
+            "leurs messages y sont supprimés automatiquement grâce à **Gérer les messages**."
         )
     return (
-        "\n⚠️ Donne-moi la permission **Gérer les messages** : sans elle je ne peux pas effacer "
-        "les messages des administrateurs, que Discord laisse toujours écrire partout."
+        "\nℹ️ Les membres ne peuvent pas écrire dans ces salons. Discord autorise toujours les "
+        "administrateurs ; **Gérer les messages** est facultatif si tu veux que je nettoie leurs messages."
     )

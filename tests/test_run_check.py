@@ -135,3 +135,18 @@ async def test_annonce_comporte_le_bouton_dinvitation(cog, serveur_configure):
     urls = [child.url for child in kwargs["view"].children]
     assert any("oauth2/authorize" in url and "client_id=999" in url for url in urls)
     assert kwargs["embed"].footer.text.startswith("🎁 FreeGameDrop")
+
+
+async def test_verifications_simultanees_sans_doublons(cog, serveur_configure):
+    import asyncio
+
+    salons = await serveur_configure([STEAM])
+    counts = await asyncio.gather(cog.run_check(), cog.run_check())
+    assert sum(counts) == 1
+    assert len(salons["steam"].sent) == 1
+
+
+async def test_verification_ciblee_ignore_les_autres_serveurs(cog, serveur_configure):
+    salons = await serveur_configure([STEAM])
+    assert await cog.run_check(target_guild_id=99999) == 0
+    assert not salons["steam"].sent

@@ -16,40 +16,68 @@ SOURCE_KEY = "epic"
 
 def _active_promotion(element: dict) -> dict | None:
     """Retourne l'offre promotionnelle en cours (prix à 0€), sinon None."""
-    promotions = element.get("promotions") or {}
-    for offer_group in promotions.get("promotionalOffers") or []:
-        for offer in offer_group.get("promotionalOffers") or []:
-            discount = (offer.get("discountSetting") or {}).get("discountPercentage")
+    promotions = element.get("promotions")
+    if not isinstance(promotions, dict):
+        return None
+    groups = promotions.get("promotionalOffers")
+    if not isinstance(groups, list):
+        return None
+    for offer_group in groups:
+        if not isinstance(offer_group, dict):
+            continue
+        offers = offer_group.get("promotionalOffers")
+        if not isinstance(offers, list):
+            continue
+        for offer in offers:
+            if not isinstance(offer, dict):
+                continue
+            setting = offer.get("discountSetting")
+            discount = setting.get("discountPercentage") if isinstance(setting, dict) else None
             if discount == 0:
                 return offer
     return None
 
 
 def _product_slug(element: dict) -> str | None:
-    mappings = element.get("offerMappings") or []
-    if mappings and mappings[0].get("pageSlug"):
-        return mappings[0]["pageSlug"]
+    mappings = element.get("offerMappings")
+    if isinstance(mappings, list):
+        for mapping in mappings:
+            if isinstance(mapping, dict) and mapping.get("pageSlug"):
+                return str(mapping["pageSlug"])
     if element.get("productSlug"):
         return str(element["productSlug"]).split("/")[0]
-    catalog_ns = element.get("catalogNs") or {}
-    for mapping in catalog_ns.get("mappings") or []:
-        if mapping.get("pageSlug"):
-            return mapping["pageSlug"]
+    catalog_ns = element.get("catalogNs")
+    if isinstance(catalog_ns, dict):
+        mappings = catalog_ns.get("mappings")
+        if isinstance(mappings, list):
+            for mapping in mappings:
+                if isinstance(mapping, dict) and mapping.get("pageSlug"):
+                    return str(mapping["pageSlug"])
     return None
 
 
 def _thumbnail(element: dict) -> str:
-    for image in element.get("keyImages") or []:
-        if image.get("type") in {"OfferImageWide", "DieselStoreFrontWide", "Thumbnail"}:
-            return image.get("url", "")
-    images = element.get("keyImages") or []
-    return images[0].get("url", "") if images else ""
+    images = element.get("keyImages")
+    if not isinstance(images, list):
+        return ""
+    for image in images:
+        if (
+            isinstance(image, dict)
+            and image.get("type") in {"OfferImageWide", "DieselStoreFrontWide", "Thumbnail"}
+        ):
+            return str(image.get("url") or "")
+    for image in images:
+        if isinstance(image, dict) and image.get("url"):
+            return str(image["url"])
+    return ""
 
 
 def _original_price_text(element: dict) -> str:
-    price = (element.get("price") or {}).get("totalPrice") or {}
-    fmt = price.get("fmtPrice") or {}
-    return fmt.get("originalPrice") or ""
+    price = element.get("price")
+    total = price.get("totalPrice") if isinstance(price, dict) else None
+    fmt = total.get("fmtPrice") if isinstance(total, dict) else None
+    original = fmt.get("originalPrice") if isinstance(fmt, dict) else None
+    return str(original or "")
 
 
 def _parse_element(element: dict) -> dict | None:
@@ -108,12 +136,20 @@ async def fetch_giveaways() -> list:
     except (KeyError, TypeError):
         log.warning("Format de réponse inattendu d'Epic Games Store")
         return []
+    if not isinstance(elements, list):
+        log.warning("Format de réponse inattendu d'Epic Games Store : la liste des jeux est absente")
+        return []
 
     games = []
-    for element in elements or []:
+    for index, element in enumerate(elements):
         if not isinstance(element, dict):
+            log.debug("Élément %s de la réponse Epic ignoré : objet attendu", index)
             continue
-        parsed = _parse_element(element)
+        try:
+            parsed = _parse_element(element)
+        except (AttributeError, TypeError, ValueError):
+            log.warning("Élément %s de la réponse Epic illisible ; il est ignoré", index, exc_info=True)
+            continue
         if parsed is not None:
             games.append(parsed)
     return games

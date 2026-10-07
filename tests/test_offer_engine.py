@@ -79,3 +79,17 @@ async def test_sources_filtrables_explicitement(monkeypatch):
 
 async def test_aucune_source_active():
     assert await offer_engine.fetch_offers(sources=[]) == []
+
+
+async def test_identifiants_absents_ignores(monkeypatch):
+    monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", lambda: _ok([{}, None, GP_GAME]))
+    assert [g["id"] for g in await offer_engine.fetch_offers(sources=["gamerpower"])] == [1]
+
+
+async def test_liste_sources_vide_nappelle_rien(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    fetch = AsyncMock(return_value=[GP_GAME])
+    monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", fetch)
+    assert await offer_engine.fetch_offers(sources=[]) == []
+    fetch.assert_not_called()

@@ -24,7 +24,10 @@ async def fetch_giveaways() -> list:
                     log.warning("GamerPower a répondu avec le code %s", resp.status)
                     return []
                 data = await resp.json()
-                return data if isinstance(data, list) else []
+                if not isinstance(data, list):
+                    log.warning("Format de réponse inattendu de GamerPower : une liste était attendue")
+                    return []
+                return data
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         log.warning("Impossible de joindre GamerPower : %s", e)
         return []

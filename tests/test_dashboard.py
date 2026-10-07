@@ -231,7 +231,7 @@ def test_lien_dinvitation_utilise_les_permissions_du_readme(monkeypatch):
 
     url = dashboard.build_invite_url(guild_id=987)
 
-    assert "permissions=268528656" in url
+    assert "permissions=268454928" in url
     assert "guild_id=987" in url
     assert "scope=bot+applications.commands" in url
 
@@ -335,6 +335,7 @@ async def test_config_enregistre_salon_et_role(guild_client, db):
 
     assert resp.status == 302
     assert (await db.get_platform_channels(123)) == {"steam": 502}
+    assert await db.get_guild_platforms(123) == ["steam"]
     assert (await db.get_guild_platform_roles(123)) == {"steam": 601}
     assert (await db.get_guild_reminder_channel(123)) == 501
 

@@ -140,3 +140,140 @@ async def test_reset_all_supprime_tout(cog, guild, db):
 class _FakeResponse:
     status = 403
     reason = "Forbidden"
+
+
+async def test_configurations_simultanees_sans_doublons(cog, guild, db):
+    import asyncio
+
+    reports = await asyncio.gather(
+        cog.apply_setup(guild, ["steam", "epic"], []),
+        cog.apply_setup(guild, ["steam", "epic"], []),
+    )
+    assert all(report.startswith("✅") for report in reports)
+    assert len(guild.categories) == 1
+    assert len(guild.text_channels) == 3
+    channel = guild.get_channel(await db.get_roles_channel(guild.id))
+    assert len(channel.sent) == 1
+
+
+async def test_repare_role_et_salon_supprimes(cog, guild, db):
+    await cog.apply_setup(guild, ["steam"], [])
+    channel_id = (await db.get_platform_channels(guild.id))["steam"]
+    role_id = await db.get_platform_role(guild.id, "steam")
+    await guild.get_channel(channel_id).delete()
+    # Discord retire réellement le rôle du cache lors de sa suppression.
+    guild.roles.remove(guild.get_role(role_id))
+    assert (await cog.apply_setup(guild, ["steam"], [])).startswith("✅")
+    assert (await db.get_platform_channels(guild.id))["steam"] != channel_id
+    assert await db.get_platform_role(guild.id, "steam") != role_id
+    assert len(guild.text_channels) == 2
+
+
+async def test_plateforme_decochee_reactivable(cog, guild, db):
+    await cog.apply_setup(guild, ["steam", "epic"], [])
+    channels = await db.get_platform_channels(guild.id)
+    await cog.apply_setup(guild, ["steam"], [])
+    assert [route[1] for route in await db.get_routes()] == ["steam"]
+    await cog.apply_setup(guild, ["steam", "epic"], [])
+    assert await db.get_platform_channels(guild.id) == channels
+
+
+async def test_permissions_minimales_suffisent(db, fakes, cog_for):
+    from utils.branding import INVITE_PERMISSIONS
+
+    guild = fakes.Guild(discord.Permissions(INVITE_PERMISSIONS))
+    cog = cog_for(guild)
+    assert (await cog.apply_setup(guild, ["steam"], [])).startswith("✅")
+    assert (await cog.apply_setup(guild, ["steam"], [])).startswith("✅")
+    channel = guild.get_channel(await db.get_roles_channel(guild.id))
+    assert len(channel.sent) == 1
+
+
+async def test_panneau_supprime_recree(cog, guild, db):
+    await cog.apply_setup(guild, ["steam"], [])
+    channel = guild.get_channel(await db.get_roles_channel(guild.id))
+    old_id = await db.get_roles_panel_message(guild.id)
+    await channel.messages[0].delete()
+    assert (await cog.apply_setup(guild, ["steam"], [])).startswith("✅")
+    assert await db.get_roles_panel_message(guild.id) != old_id
+
+
+async def test_redemarrage_reutilise_les_identifiants(cog, guild, db, cog_for):
+    await cog.apply_setup(guild, ["steam"], [])
+    channels = await db.get_platform_channels(guild.id)
+    restarted = cog_for(guild)
+    await db.init_db()
+    assert (await restarted.apply_setup(guild, ["steam"], [])).startswith("✅")
+    assert await db.get_platform_channels(guild.id) == channels
+
+
+async def test_permission_manquante_avant_toute_creation(cog, guild, db):
+    guild.me.guild_permissions.manage_roles = False
+    report = await cog.apply_setup(guild, ["steam"], [])
+    assert "Gérer les rôles" in report
+    assert guild.categories == []
+
+
+async def test_role_homonyme_privilegie_refuse(cog, guild, db):
+    role = guild.add_role("🔵 Steam")
+    role.permissions = discord.Permissions(administrator=True)
+    report = await cog.apply_setup(guild, ["steam"], [])
+    assert report.startswith("⚠️")
+    assert await db.get_platform_role(guild.id, "steam") is None
+
+
+async def test_salon_homonyme_non_modifie(cog, guild, db, fakes):
+    category = fakes.Category(guild, "Communauté")
+    guild.categories.append(category)
+    channel = await category.create_text_channel("jeux-steam", topic="À conserver")
+    report = await cog.apply_setup(guild, ["steam"], [])
+    assert "Renomme" in report
+    assert channel.topic == "À conserver"
+    assert await db.get_platform_channels(guild.id) == {}
+
+
+async def test_permission_retiree_pendant_le_menu():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cogs.jeux import SetupView
+
+    interaction = SimpleNamespace(
+        guild=object(),
+        user=SimpleNamespace(guild_permissions=discord.Permissions.none()),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    view = SetupView(None, ["steam"])
+    assert not await view.interaction_check(interaction)
+    interaction.response.send_message.assert_awaited_once()
+
+
+async def test_confirmation_declenche_verification_ciblee():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cogs.jeux import SetupView
+
+    cog = SimpleNamespace(apply_setup=AsyncMock(return_value="✅ Prêt"), run_check=AsyncMock(return_value=1))
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=7),
+        response=SimpleNamespace(edit_message=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+    view = SetupView(cog, ["steam"])
+    await view.confirm.callback(interaction)
+    cog.run_check.assert_awaited_once_with(target_guild_id=7)
+    assert view.is_finished()
+
+
+async def test_menu_expire_explique_la_reprise():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cogs.jeux import SetupView
+
+    view = SetupView(None)
+    view.message = SimpleNamespace(edit=AsyncMock())
+    await view.on_timeout()
+    assert "setup-auto" in view.message.edit.call_args.kwargs["content"]
+    assert view.message.edit.call_args.kwargs["view"] is None
