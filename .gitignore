@@ -1,6 +1,12 @@
 # Secrets et données locales
 .env
 *.db
+*.db-wal
+*.db-shm
+
+# Base de développement (le dossier est conservé pour la structure du projet)
+data/*
+!data/.gitkeep
 
 # Python
 __pycache__/

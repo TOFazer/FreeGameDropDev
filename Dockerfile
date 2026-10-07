@@ -17,6 +17,9 @@ COPY utils/ utils/
 COPY web/ web/
 
 # La base SQLite vit dans /app/data pour survivre aux mises à jour de l'image.
+# C'est le chemin de PRODUCTION ; l'environnement de développement utilise
+# docker-compose.dev.yml, qui force ENVIRONMENT=development et
+# DB_PATH=/app/data/freegamedrop-dev.db dans son propre volume.
 RUN mkdir -p /app/data
 ENV DB_PATH=/app/data/bot.db
 

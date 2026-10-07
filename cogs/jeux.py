@@ -17,7 +17,16 @@ from discord.ext import commands, tasks
 import config
 import database
 from services import offer_engine
-from utils import branding, design, metrics, monitoring, notifications, platforms, rate_limits
+from utils import (
+    branding,
+    design,
+    environment,
+    metrics,
+    monitoring,
+    notifications,
+    platforms,
+    rate_limits,
+)
 from utils.embeds import build_game_message, build_roles_embed, source_label
 from utils.logging_setup import log_event
 from utils.offers import filter_offers, normalize_genres, normalize_platforms
@@ -1058,6 +1067,15 @@ class Jeux(commands.Cog):
     @tasks.loop(hours=1)
     async def check_games(self):
         interval = config.CHECK_INTERVAL_HOURS * 3600
+        # Mode maintenance : la veille automatique est suspendue, mais les commandes
+        # d'administration (`/test-jeux`, `/check`) restent utilisables pour tester.
+        if config.MAINTENANCE_MODE:
+            log_event("check.skipped", reason="maintenance")
+            log.info(
+                "🔧 %s en maintenance : vérification automatique ignorée.",
+                environment.product_name(),
+            )
+            return
         try:
             await self.run_check()
         except Exception as error:

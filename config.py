@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-from utils import design
+from utils import design, environment
 
 load_dotenv()
 
@@ -43,6 +43,27 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+# ---------- Environnement (DEV / PROD) ----------
+
+# Identifie l'instance. Ne choisit JAMAIS le jeton : `DISCORD_TOKEN` vient toujours du
+# `.env`. Sert au préfixe des journaux, aux titres du tableau de bord et au garde-fou de
+# démarrage (voir utils/environment.py et ENVIRONMENTS.md).
+# Valeur par défaut : production — un déploiement existant ne devient pas « development »
+# par accident.
+ENVIRONMENT: str = environment.normalize(_env_str("ENVIRONMENT", environment.PRODUCTION))
+
+# Environnement attendu sur cette machine. Quand il est renseigné, un écart avec
+# ENVIRONMENT interdit le démarrage (ex. : `.env` de production lancé dans le dossier DEV).
+EXPECTED_ENVIRONMENT: str = environment.normalize(_env_str("EXPECTED_ENVIRONMENT"))
+
+# Identifiant de l'application Discord de CET environnement. Comparé à l'identifiant
+# encodé dans le jeton : un jeton d'une autre application refuse de démarrer.
+DISCORD_APPLICATION_ID: int | None = _env_int("DISCORD_APPLICATION_ID", 0) or None
+
+# Suspend les annonces automatiques (les commandes d'administration restent utilisables).
+MAINTENANCE_MODE: bool = _env_bool("MAINTENANCE_MODE", False)
+
+
 # ---------- Discord ----------
 
 DISCORD_TOKEN: str = _env_str("DISCORD_TOKEN")
@@ -51,7 +72,10 @@ DISCORD_TOKEN: str = _env_str("DISCORD_TOKEN")
 # pour éviter les doublons. Mettre TEST_GUILD_ID=0 dans .env pour désactiver.
 TEST_GUILD_ID: int | None = _env_int("TEST_GUILD_ID", 1391429196105912452) or None
 
-LOG_LEVEL: str = _env_str("LOG_LEVEL", "INFO").upper()
+# DEBUG en développement ; INFO en production, pour des journaux lisibles et stables.
+LOG_LEVEL: str = _env_str(
+    "LOG_LEVEL", "DEBUG" if ENVIRONMENT == environment.DEVELOPMENT else "INFO"
+).upper()
 
 # Fichier de journal supplémentaire (rotation automatique, 5 Mo × 3). Vide = sortie
 # standard uniquement. Les secrets y sont masqués de la même façon que sur la sortie.
@@ -72,7 +96,15 @@ VOTE_URL: str = _env_str("VOTE_URL")
 
 # ---------- Base de données ----------
 
-DB_PATH: str = _env_str("DB_PATH", "bot.db")
+# SQLite reste la base du projet (voir ENVIRONMENTS.md, section « Pourquoi pas PostgreSQL »).
+# Le fichier par défaut dépend de l'environnement : la base de développement ne doit jamais
+# être celle de la production. Le dossier parent est créé au premier démarrage (database.init_db).
+DB_PATH: str = _env_str(
+    "DB_PATH",
+    environment.DEVELOPMENT_DEFAULT_DB
+    if ENVIRONMENT == environment.DEVELOPMENT
+    else environment.PRODUCTION_DEFAULT_DB,
+)
 
 
 # ---------- Vérification des jeux ----------

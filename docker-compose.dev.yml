@@ -1,0 +1,35 @@
+# FreeGameDrop — environnement de DÉVELOPPEMENT.
+#
+#   docker compose -f docker-compose.dev.yml up -d --build
+#   docker compose -f docker-compose.dev.yml logs -f
+#   docker compose -f docker-compose.dev.yml down
+#
+# Ce fichier ne doit jamais servir la production : il utilise un conteneur, un volume
+# et un fichier SQLite distincts (voir ENVIRONMENTS.md). Le jeton reste dans `.env`,
+# qui n'est pas versionné.
+services:
+  freegamedrop-dev:
+    build: .
+    image: freegamedrop-dev
+    container_name: freegamedrop-dev
+    env_file:
+      - .env
+    environment:
+      # Redondant avec `.env` volontairement : même si `.env` est copié depuis la
+      # production, le conteneur DEV garde son identité et sa base.
+      ENVIRONMENT: development
+      EXPECTED_ENVIRONMENT: development
+      DB_PATH: /app/data/freegamedrop-dev.db
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+    volumes:
+      # Volume dédié au DEV : jamais `freegamedrop-prod-data`.
+      - freegamedrop-dev-data:/app/data
+    ports:
+      # Tableau de bord optionnel (DASHBOARD_ENABLED=true dans .env). L'écoute reste sur
+      # la boucle locale par défaut : expose-la (DASHBOARD_BIND=0.0.0.0) seulement derrière
+      # un reverse proxy, et jamais sans DASHBOARD_COOKIE_SECURE=true en HTTPS.
+      - "${DASHBOARD_BIND:-127.0.0.1}:${DASHBOARD_PORT:-8080}:${DASHBOARD_PORT:-8080}"
+    restart: unless-stopped
+
+volumes:
+  freegamedrop-dev-data:
