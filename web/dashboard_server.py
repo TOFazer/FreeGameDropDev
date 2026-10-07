@@ -15,7 +15,7 @@ from aiohttp import web
 
 import config
 import database
-from utils import metrics
+from utils import metrics, monitoring
 from web import dashboard
 
 log = logging.getLogger(__name__)
@@ -92,6 +92,15 @@ async def handle_api_stats(request: web.Request) -> web.Response:
     bot = request.app[BOT_KEY]
     stats = await metrics.build_dev_stats(bot) if bot is not None else await database.get_giveaway_stats()
     return web.json_response(stats)
+
+
+async def handle_health(request: web.Request) -> web.Response:
+    """État mesuré du bot en JSON, pour une supervision externe (uptime, alerting).
+
+    Aucun secret n'y figure : uniquement des états, des horodatages et des compteurs.
+    """
+    snapshot = await monitoring.collect(request.app[BOT_KEY])
+    return web.json_response(monitoring.to_jsonable(snapshot))
 
 
 async def handle_offers(request: web.Request) -> web.Response:
@@ -347,6 +356,8 @@ def create_app(bot) -> web.Application:
     app[BOT_KEY] = bot
     app.router.add_get("/", handle_home)
     app.router.add_get("/api/stats", handle_api_stats)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/health", handle_health)
     app.router.add_get("/offres", handle_offers)
     app.router.add_get("/serveurs", handle_guilds)
     app.router.add_get("/serveurs/{guild_id}", handle_guild_config)

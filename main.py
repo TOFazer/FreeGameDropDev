@@ -1,16 +1,18 @@
 """Point d'entrée du bot : python main.py"""
 
 import logging
+import math
 
 import discord
 from discord.ext import commands
 
 import config
 import database
+from utils.logging_setup import configure_logging, log_event
 
 log = logging.getLogger(__name__)
 
-EXTENSIONS = ("cogs.setup", "cogs.jeux")
+EXTENSIONS = ("cogs.setup", "cogs.jeux", "cogs.sante")
 
 
 class ReleaseBot(commands.Bot):
@@ -46,6 +48,16 @@ class ReleaseBot(commands.Bot):
 
     async def on_ready(self):
         log.info("Connecté en tant que %s", self.user)
+        latency_ms = round(self.latency * 1000) if math.isfinite(self.latency) else None
+        log_event("discord.ready", guilds=len(self.guilds), latency_ms=latency_ms)
+
+    async def on_disconnect(self):
+        log.warning("Connexion Discord perdue ; discord.py va tenter de se reconnecter")
+        log_event("discord.disconnected", level=logging.WARNING)
+
+    async def on_resumed(self):
+        log.info("Connexion Discord rétablie")
+        log_event("discord.resumed")
 
     async def close(self):
         if self.dashboard_runner is not None:
@@ -56,11 +68,14 @@ class ReleaseBot(commands.Bot):
 
 
 def main():
-    discord.utils.setup_logging(level=getattr(logging, config.LOG_LEVEL, logging.INFO))
+    # Journalisation sûre : les secrets (token, clés OAuth, jetons de webhook) sont
+    # masqués avant l'écriture, sur la sortie standard comme dans LOG_FILE.
+    configure_logging(config.LOG_LEVEL)
     if not config.DISCORD_TOKEN:
         raise SystemExit(
             "DISCORD_TOKEN manquant : copie .env.example en .env et renseigne ton token."
         )
+    log_event("bot.starting", sources=len(config.OFFER_SOURCES))
     ReleaseBot().run(config.DISCORD_TOKEN, log_handler=None)
 
 

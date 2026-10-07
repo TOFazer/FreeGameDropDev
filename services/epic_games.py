@@ -80,9 +80,29 @@ def _original_price_text(element: dict) -> str:
     return str(original or "")
 
 
+def _discount_price_is_zero(element: dict) -> bool | None:
+    """Le prix actuel est-il nul ? None quand l'information n'est pas fournie.
+
+    Garde-fou contre les faux positifs : une remise à 0 % doit correspondre à un
+    prix réellement nul. Quand le champ est absent, on ne conclut rien (la source
+    ne se prononce pas) et l'offre reste éligible.
+    """
+    price = element.get("price")
+    total = price.get("totalPrice") if isinstance(price, dict) else None
+    if not isinstance(total, dict) or "discountPrice" not in total:
+        return None
+    try:
+        return int(total["discountPrice"]) == 0
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_element(element: dict) -> dict | None:
     offer = _active_promotion(element)
     if offer is None:
+        return None
+    if _discount_price_is_zero(element) is False:
+        log.debug("Offre Epic ignorée : remise à 0 % mais prix actuel non nul")
         return None
 
     slug = _product_slug(element)
@@ -106,6 +126,8 @@ def _parse_element(element: dict) -> dict | None:
         "type": "game",
         "genres": [],
         "source": SOURCE_KEY,
+        # Promo vérifiée ici même : remise à 0 % et prix actuel nul (ou inconnu).
+        "free_verified": True,
     }
 
 

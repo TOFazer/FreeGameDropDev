@@ -68,6 +68,36 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
 - `Dockerfile` et `.dockerignore` pour l'hébergement continu (PaaS, serveur perso).
 - Licence MIT.
 
+## Livré — V2.2 : débit maîtrisé, journal sûr, surveillance et fiabilité des sources
+
+- **Limites de débit** (`utils/rate_limits.py`) : quota par membre pour les commandes de lecture,
+  quota partagé par serveur pour les actions administratives, plafond global par membre, fenêtre
+  glissante et messages d'attente courtois. Les valeurs par défaut sont larges : un usage normal
+  ne les remarque jamais, un abus est ralenti.
+- **Respect des limites Discord** : espacement des envois dans un même salon ou vers un même
+  membre, et une seule reprise quand Discord répond `429` — en tenant compte du `Retry-After`
+  qu'il fournit. Le cache court des offres (`OFFER_CACHE_SECONDS`) et l'appel unique partagé
+  épargnent aussi les API de sources.
+- **Journal de bord** (`utils/logging_setup.py`) : événements stables `event=… clé=valeur`
+  (appel de source, succès, délai dépassé, offre détectée, doublon, offre écartée, annonce
+  envoyée, alerte envoyée). Les secrets sont masqués avant écriture, y compris dans les traces
+  d'exception ; `LOG_FILE` ajoute un fichier à rotation et `LOG_PSEUDONYMIZE_IDS` peut remplacer
+  les identifiants Discord par une empreinte stable.
+- **Surveillance** (`utils/monitoring.py`, `cogs/sante.py`) : état mesuré du bot, de Discord, de
+  la base et de chaque source ; `/sante` affiche le rapport et `/api/health` l'expose en JSON pour
+  une supervision externe.
+- **Alertes automatiques** : source tombée (`SOURCE_DOWN_AFTER_MINUTES`), base injoignable, tâche
+  arrêtée, connexion Discord dégradée ou perdue, pic d'erreurs — avec anti-spam
+  (`MONITOR_ALERT_COOLDOWN_MINUTES`) et message de rétablissement. Le battement de cœur est
+  enregistré en base pour qu'une alerte puisse partir même si Discord est coupé.
+- **Sources fiables, sans faux positif** : une offre n'est annoncée que si elle est réellement
+  présentable — identifiant et titre présents, lien `http(s)` valide, date de fin encore future,
+  et statut non contredit par la source (`free_verified`, déduit du statut GamerPower et du prix
+  réellement nul côté Epic Games Store). Une offre écartée est journalisée avec son motif.
+- **Tests de panne et de régression** (331 tests) : API indisponible, réponse illisible, délai
+  dépassé, base injoignable, `429` Discord, offre expirée ou non active, quotas atteints, journaux
+  contenant un token.
+
 ## Prochains lots
 
 ### V2 — compléments
