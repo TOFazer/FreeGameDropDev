@@ -2,13 +2,14 @@
 
 import logging
 import math
+from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import branding, design, metrics, monitoring, rate_limits
+from utils import branding, design, environment, metrics, monitoring, rate_limits
 
 
 def build_info_embed(bot: commands.Bot) -> discord.Embed:
@@ -16,13 +17,31 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
     latency = getattr(bot, "latency", float("inf"))
     latency_text = f"{round(latency * 1000)} ms" if math.isfinite(latency) else "indisponible"
 
+    development = environment.is_development(config.ENVIRONMENT)
+    # Le nom affiché et le champ « Environnement » rendent impossible de confondre les deux bots.
+    title = f"{environment.emoji_of(config.ENVIRONMENT)} {environment.product_name()}"
+
     embed = discord.Embed(
-        title="🎮 FreeGameDrop",
+        title=title,
         description="Les jeux gratuits du moment, annoncés automatiquement sur Discord.",
         colour=discord.Colour(design.embed_colour("new")),
     )
+    embed.add_field(name="Environnement", value=environment.describe(), inline=True)
     embed.add_field(name="Latence", value=latency_text, inline=True)
     embed.add_field(name="Serveurs", value=f"{len(bot.guilds):,}", inline=True)
+    # Le chemin complet de la base n'est pas exposé publiquement : en DEV, son nom suffit
+    # à vérifier d'un coup d'œil que le bot n'écrit pas dans la production.
+    database_text = "SQLite"
+    if development:
+        database_text = f"SQLite · {Path(config.DB_PATH).name}"
+    embed.add_field(name="Base de données", value=database_text, inline=True)
+    if config.MAINTENANCE_MODE:
+        embed.add_field(
+            name="🔧 Maintenance",
+            value=f"{environment.product_name()} est en maintenance : les annonces "
+            "automatiques sont suspendues, les commandes de test restent disponibles.",
+            inline=False,
+        )
 
     links = []
     if bot.user is not None:
@@ -37,7 +56,10 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
     embed.add_field(
         name="Liens utiles", value=" · ".join(links) or "Aucun lien configuré.", inline=False
     )
-    embed.set_footer(text="FreeGameDrop • Merci de faire partie de la communauté !")
+    if development:
+        embed.set_footer(text="🧪 FreeGameDrop DEV • instance de test, données séparées de la production")
+    else:
+        embed.set_footer(text="FreeGameDrop • Merci de faire partie de la communauté !")
     return embed
 
 

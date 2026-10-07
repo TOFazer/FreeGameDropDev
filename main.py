@@ -1,4 +1,10 @@
-"""Point d'entrée du bot : python main.py"""
+"""Point d'entrée du bot : python main.py
+
+Au démarrage, l'environnement déclaré (`ENVIRONMENT` dans `.env`) est vérifié avant
+toute connexion Discord : jeton, identifiant d'application et fichier SQLite doivent
+tous désigner le même environnement, sinon le bot refuse de démarrer (voir
+utils/environment.py et ENVIRONMENTS.md).
+"""
 
 import logging
 import math
@@ -8,6 +14,7 @@ from discord.ext import commands
 
 import config
 import database
+from utils import environment
 from utils.logging_setup import configure_logging, log_event
 
 log = logging.getLogger(__name__)
@@ -22,6 +29,8 @@ class ReleaseBot(commands.Bot):
 
     async def setup_hook(self):
         await database.init_db()
+        # Confirme le fichier SQLite réellement utilisé : DEV et PROD n'y touchent pas ensemble.
+        environment.log_database(log, db_path=database.DB_PATH)
         for extension in EXTENSIONS:
             await self.load_extension(extension)
 
@@ -47,9 +56,16 @@ class ReleaseBot(commands.Bot):
         log.info("Commandes envoyées à Discord : %s", [c.name for c in synced])
 
     async def on_ready(self):
+        # Le bandeau rappelle l'environnement : si le mauvais bot a démarré, ça se voit ici.
         log.info("Connecté en tant que %s", self.user)
+        environment.log_connected(log, user=self.user, guilds=len(self.guilds))
         latency_ms = round(self.latency * 1000) if math.isfinite(self.latency) else None
-        log_event("discord.ready", guilds=len(self.guilds), latency_ms=latency_ms)
+        log_event(
+            "discord.ready",
+            guilds=len(self.guilds),
+            latency_ms=latency_ms,
+            environment=environment.current(),
+        )
 
     async def on_disconnect(self):
         log.warning("Connexion Discord perdue ; discord.py va tenter de se reconnecter")
@@ -75,7 +91,29 @@ def main():
         raise SystemExit(
             "DISCORD_TOKEN manquant : copie .env.example en .env et renseigne ton token."
         )
-    log_event("bot.starting", sources=len(config.OFFER_SOURCES))
+
+    # Garde-fou DEV / PROD : jeton, application Discord et base SQLite doivent désigner
+    # l'environnement déclaré. En cas d'incohérence, rien n'est tenté côté Discord.
+    try:
+        environment.verify_startup(config)
+    except environment.EnvironmentRefused as refused:
+        raise SystemExit(str(refused)) from refused
+
+    environment.log_start(
+        log,
+        db_path=config.DB_PATH,
+        application_id=config.DISCORD_APPLICATION_ID,
+        maintenance=config.MAINTENANCE_MODE,
+    )
+    if config.MAINTENANCE_MODE:
+        environment.log_maintenance(log)
+
+    log_event(
+        "bot.starting",
+        environment=config.ENVIRONMENT,
+        sources=len(config.OFFER_SOURCES),
+        maintenance=config.MAINTENANCE_MODE,
+    )
     ReleaseBot().run(config.DISCORD_TOKEN, log_handler=None)
 
 

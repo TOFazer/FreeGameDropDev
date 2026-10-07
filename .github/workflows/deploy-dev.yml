@@ -1,0 +1,64 @@
+name: Deploy DEV
+
+# Le déploiement DEV ne part QUE si la porte « CI OK » est verte sur `main`
+# (tests, style, garde-fou d'environnement, image Docker).
+#
+# Il est volontairement inerte tant que rien n'est configuré : sans la variable
+# `DEV_DEPLOY_ENABLED=true` et le secret `DEV_DEPLOY_WEBHOOK`, le job se contente de
+# résumer ce qu'il reste à brancher. Aucune connexion à la production n'est possible.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-dev:
+    name: Déployer en développement
+    runs-on: ubuntu-latest
+    environment: development
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    steps:
+      - name: État du déploiement DEV
+        run: |
+          {
+            echo "## 🧪 FreeGameDrop DEV"
+            echo ""
+            echo "- Commit : \`${{ github.event.workflow_run.head_sha || github.sha }}\`"
+            echo "- Branche : \`${{ github.event.workflow_run.head_branch || github.ref_name }}\`"
+            echo "- CI : ${{ github.event.workflow_run.conclusion || 'déclenchement manuel' }}"
+            echo "- Déploiement : ${{ vars.DEV_DEPLOY_ENABLED == 'true' && 'activé' || 'non configuré' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Aucun déploiement DEV configuré
+        if: vars.DEV_DEPLOY_ENABLED != 'true'
+        run: |
+          echo "⏭️ Aucun déploiement automatique : définis la variable de dépôt"
+          echo "   DEV_DEPLOY_ENABLED=true et le secret DEV_DEPLOY_WEBHOOK pour l'activer."
+          echo "   En attendant : docker compose -f docker-compose.dev.yml up -d --build"
+
+      - name: Déclencher le redéploiement DEV
+        if: vars.DEV_DEPLOY_ENABLED == 'true'
+        env:
+          WEBHOOK: ${{ secrets.DEV_DEPLOY_WEBHOOK }}
+        run: |
+          test -n "$WEBHOOK" || { echo "❌ Secret DEV_DEPLOY_WEBHOOK manquant."; exit 1; }
+          # Le webhook ne porte que l'environnement de développement : la production
+          # a son propre déploiement, hors de ce dépôt de développement.
+          curl -fsS -X POST "$WEBHOOK"
+          echo "✅ Redéploiement DEV déclenché."
+
+      - name: Rappel de vérification après déploiement
+        if: vars.DEV_DEPLOY_ENABLED == 'true'
+        run: |
+          echo "Vérifie dans les journaux du serveur DEV la ligne d'identité :"
+          echo "  [DEVELOPMENT] FreeGameDrop starting..."
+          echo "  [DEVELOPMENT] Database: /app/data/freegamedrop-dev.db"
+          echo "  [DEVELOPMENT] Discord application: <identifiant de l'application DEV>"

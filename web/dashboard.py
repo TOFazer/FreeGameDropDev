@@ -24,7 +24,7 @@ import aiohttp
 
 import config
 import database
-from utils import branding, design
+from utils import branding, design, environment
 from utils import platforms as platform_utils
 from utils.offers import parse_end_datetime
 
@@ -231,12 +231,40 @@ def guild_icon_url(guild: dict) -> str:
 # ---------- Habillage HTML ----------
 
 
+def _environment_banner() -> str:
+    """Bandeau DEV / maintenance, invisible en production nominale.
+
+    Un tableau de bord de développement ne doit jamais ressembler à celui de la
+    production : le titre et le bandeau le disent avant même de lire la page.
+    """
+    if environment.is_development(config.ENVIRONMENT):
+        parts = [
+            f"{environment.emoji_of()} <strong>{html.escape(environment.product_name())}</strong>"
+            " — environnement de développement, base et application Discord dédiées."
+        ]
+    else:
+        parts = []
+    if config.MAINTENANCE_MODE:
+        parts.append("🔧 Maintenance : les annonces automatiques sont suspendues.")
+    if not parts:
+        return ""
+    return f'<div class="notice env-banner">{" ".join(parts)}</div>'
+
+
 def _page(title: str, body: str, user: dict | None = None, active: str = "") -> str:
+    page_title = environment.page_title(title)
+    site_name = environment.product_name()
+    badge = ""
+    footer_note = ""
+    if environment.is_development(config.ENVIRONMENT):
+        tag = environment.TAG[environment.DEVELOPMENT]
+        badge = f'<span class="badge new env-tag">{environment.emoji_of()} {tag}</span>'
+        footer_note = f" · {environment.emoji_of()} {environment.label_of()}"
     return f"""<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>{html.escape(title)}</title>
+<title>{html.escape(page_title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -312,17 +340,20 @@ a.badge.active {{ background: var(--fgd-primary-soft); border-color: var(--fgd-p
 .filters a {{ margin-right: 8px; }}
 .notice {{ background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.35);
            border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }}
+.notice.env-banner {{ background: rgba(250, 204, 21, 0.08); border-color: rgba(250, 204, 21, 0.35); }}
+.env-tag {{ margin-left: 8px; }}
 </style>
 </head>
 <body>
 <header>
-<h1><a href="/">🎮 FreeGameDrop</a></h1>
+<h1><a href="/">🎮 {html.escape(site_name)}</a></h1>{badge}
 {_nav(user, active)}
 </header>
 <main>
+{_environment_banner()}
 {body}
 </main>
-<footer>{html.escape(design.FOOTER)}</footer>
+<footer>{html.escape(design.FOOTER)}{footer_note}</footer>
 </body>
 </html>"""
 

@@ -125,6 +125,32 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
 - **Dashboard** : thème sombre et police issus des tokens (`css_variables()`), boutons et
   badges de marque, vignettes d'offres 16:9, échéance colorée selon l'urgence.
 
+## Livré — V2.4 : environnement de développement isolé (DEV / PROD)
+
+- **Environnement explicite** : `ENVIRONMENT` (`development` / `production`) et
+  `EXPECTED_ENVIRONMENT` dans `.env` ; le jeton ne vient jamais d'ailleurs que de
+  `DISCORD_TOKEN`, l'environnement ne fait que contrôler la cohérence (`utils/environment.py`).
+- **Garde-fou de démarrage** : l'identifiant d'application encodé dans le jeton est comparé à
+  `DISCORD_APPLICATION_ID` et `DISCORD_CLIENT_ID` sans appel réseau ; un écart, un
+  environnement inconnu, un `ENVIRONMENT` ≠ `EXPECTED_ENVIRONMENT` ou un `DB_PATH` de l'autre
+  environnement interdisent le démarrage (« ❌ Discord application mismatch »).
+- **Bandeau d'identité** dans les journaux : `[DEVELOPMENT] FreeGameDrop starting...`,
+  `[DEVELOPMENT] Database: data/freegamedrop-dev.db`, `[DEVELOPMENT] Discord bot connected`.
+- **Base DEV séparée** : `data/freegamedrop-dev.db` (dossier créé automatiquement, ignoré par
+  git) ; la production garde `bot.db`. SQLite reste la base du projet : aucune migration
+  PostgreSQL à ce stade.
+- **Tableau de bord DEV** : `🧪 FreeGameDrop DEV`, badge `🧪 DEV` et bandeau explicite ;
+  OAuth DEV séparé (autre Client Secret, redirection `http://localhost:8080/auth/callback`).
+- **`/info`** affiche l'environnement (`🧪 Development` / `🚀 Production`) et, en DEV, le
+  fichier SQLite utilisé.
+- **Docker DEV** : `docker-compose.dev.yml`, conteneur `freegamedrop-dev`, volume
+  `freegamedrop-dev-data` — jamais le volume de la production.
+- **Mode maintenance** (`MAINTENANCE_MODE=true`) : la veille automatique est suspendue, les
+  commandes d'administration restent disponibles, `/info` et le tableau de bord l'affichent.
+- **CI renforcée** : style, tests (3.10 → 3.12), garde-fou exécuté sur le vrai binaire, image
+  Docker et validation du compose, puis porte unique **CI OK** ; le déploiement DEV
+  (`.github/workflows/deploy-dev.yml`) ne part qu'après une CI verte sur `main`.
+
 ## Prochains lots
 
 ### V2 — compléments
@@ -147,6 +173,9 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
 - Une pression sur « récupérer » ne prouve pas que le jeu a été réclamé : toute statistique de collection ou d'argent économisé devra être présentée comme déclarative, ou confirmée explicitement par l'utilisateur.
 - Traductions des messages et préférences de langue.
 - API publique et offre premium après définition des besoins d'hébergement, de sécurité et de confidentialité.
+- Migration SQLite → PostgreSQL **uniquement** quand la charge ou le multi-instance le justifiera :
+  le schéma actuel (`database.py`) et les environnements séparés (DEV / PROD) restent la référence
+  tant que ce besoin n'est pas mesuré. Aucun changement de base n'est prévu pour l'instant.
 
 ## Limites actuelles des données
 

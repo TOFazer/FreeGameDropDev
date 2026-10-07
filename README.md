@@ -108,6 +108,7 @@ Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 ## Sommaire
 
 - [Installation express](#installation-express)
+- [Environnements DEV et PROD](#environnements-dev-et-prod)
 - [Héberger le bot en continu](#héberger-le-bot-en-continu)
 - [Inviter le bot sur un serveur](#inviter-le-bot-sur-un-serveur)
 - [Lancer le bot](#lancer-le-bot)
@@ -144,10 +145,71 @@ python main.py
 Créer le bot et récupérer le token : <https://discord.com/developers/applications>
 → **New Application** → onglet **Bot** → **Reset Token** → copier dans `.env`.
 
+Le modèle `.env.example` décrit une instance de **développement** (`ENVIRONMENT=development`,
+base `data/freegamedrop-dev.db`, journaux `DEBUG`). Pour la production, garde le même code mais
+un autre `.env`, une autre application Discord et une autre base : voir
+[Environnements DEV et PROD](#environnements-dev-et-prod).
+
 Puis, sur le serveur Discord : `/setup-auto` → coche les plateformes → **Créer / mettre à jour**.
 La catégorie, les rôles, les salons privés et le panneau de boutons sont créés ou réparés d'un coup.
 Une vérification des offres démarre juste après ; la surveillance continue ensuite toutes les heures.
 Relancer la commande met à jour les choix sans créer de doublons. Aucun *intent privilégié* n'est nécessaire.
+
+---
+
+## Environnements DEV et PROD
+
+Le dépôt de développement et la production utilisent le même code, mais **jamais les mêmes
+ressources**. Le guide complet (création de l'application Discord DEV, serveur de test, OAuth,
+volumes Docker, mise en route pas à pas) est dans [`ENVIRONMENTS.md`](ENVIRONMENTS.md).
+
+```
+FreeGameDropDev (ce dépôt)              FreeGameDrop (production)
+│                                       │
+├── Bot Discord DEV                     ├── Bot Discord PROD
+├── SQLite DEV  data/freegamedrop-dev.db├── SQLite PROD  /app/data/bot.db
+├── Application Discord DEV             ├── Application Discord PROD
+├── Jeton DEV   (dans .env)             └── Jeton PROD  (dans le .env du serveur)
+└── Dashboard 🧪 FreeGameDrop DEV
+
+               ❌ AUCUN ACCÈS D'UN CÔTÉ À L'AUTRE
+```
+
+Le jeton vient toujours de `DISCORD_TOKEN` (`.env`, jamais versionné) : `ENVIRONMENT` ne le
+choisit pas, il **vérifie** que jeton, application Discord et base SQLite désignent bien le même
+environnement. Avant toute connexion Discord, le bot refuse de démarrer si :
+
+| Contrôle | En cas d'écart |
+| --- | --- |
+| `ENVIRONMENT` vaut `development` ou `production` | ❌ `ENVIRONMENT=… inconnu` |
+| `ENVIRONMENT` = `EXPECTED_ENVIRONMENT` | ❌ `Environment mismatch` |
+| identifiant encodé dans le jeton = `DISCORD_APPLICATION_ID` = `DISCORD_CLIENT_ID` | ❌ `Discord application mismatch` |
+| `DB_PATH` n'est pas celui de l'autre environnement | ❌ refus de démarrer sur la base de prod/dev |
+
+```
+[DEVELOPMENT] FreeGameDrop starting...
+[DEVELOPMENT] Environment: 🧪 Development
+[DEVELOPMENT] Database: data/freegamedrop-dev.db
+[DEVELOPMENT] Discord application: 123456789012345678
+[DEVELOPMENT] Maintenance mode: off
+[DEVELOPMENT] Discord bot connected as FreeGameDrop Dev#1234
+```
+
+`MAINTENANCE_MODE=true` suspend la veille automatique (les commandes d'administration restent
+utilisables) : pratique pour tester sans que les membres croient que le bot est cassé. `/info`
+affiche l'environnement (`🧪 Development` / `🚀 Production`) et, en DEV, le fichier SQLite
+utilisé. Le tableau de bord se présente en `🧪 FreeGameDrop DEV`, avec badge et bandeau.
+
+**En DEV**, pour tout lancer :
+
+```bash
+cp .env.example .env            # renseigne DISCORD_TOKEN, DISCORD_APPLICATION_ID, CLIENT_ID…
+python main.py                  # ou : docker compose -f docker-compose.dev.yml up -d --build
+```
+
+Cette étape ne migre **pas** vers PostgreSQL : SQLite reste la base du bot. Voir
+[`ENVIRONMENTS.md`](ENVIRONMENTS.md) §5 pour la raison, et `ROADMAP.md` pour le moment où la
+migration sera justifiée.
 
 ---
 
@@ -165,12 +227,21 @@ options simples, de la plus rapide à la plus souple :
 Le `Dockerfile` place la base SQLite dans `/app/data` : monte un volume sur ce chemin
 pour que la configuration survive aux redéploiements.
 
+Pour l'environnement de **développement**, utilise plutôt le compose dédié
+(`docker compose -f docker-compose.dev.yml up -d --build`) : conteneur, volume et base séparés,
+avec `ENVIRONMENT=development` forcé (voir [`ENVIRONMENTS.md`](ENVIRONMENTS.md) §7).
+
 ### Option B — Docker sur ton serveur
 
 ```bash
 docker build -t freegamedrop .
-docker run -d --env-file .env -v freegamedrop-data:/app/data --restart unless-stopped freegamedrop
+docker run -d --env-file .env -v freegamedrop-prod-data:/app/data --restart unless-stopped freegamedrop
 ```
+
+Nomme le volume d'après son environnement : `freegamedrop-prod-data` pour la production,
+`freegamedrop-dev-data` pour le développement (`docker-compose.dev.yml` s'en charge). **Jamais le
+même volume pour les deux.** Si tu exploites déjà un volume `freegamedrop-data` en production,
+garde-le : c'est ton volume de production, ne le monte simplement jamais sur l'instance DEV.
 
 ### Option C — Machine classique
 
@@ -446,8 +517,8 @@ paquet supplémentaire requis) sert de **centre de configuration** de FreeGameDr
 - `GET /compte`, `POST /compte/supprimer` : résumé des données conservées et suppression complète.
 - `GET /api/stats` : les statistiques globales en JSON.
 - `GET /health` et `GET /api/health` : l'état mesuré du bot en JSON (composants, sources,
-  tâches, erreurs récentes, horodatages) — à brancher sur un service de supervision externe.
-  Aucun secret n'y figure.
+  tâches, erreurs récentes, horodatages, environnement) — à brancher sur un service de
+  supervision externe. Aucun secret n'y figure.
 - `GET /login`, `GET /auth/callback`, `GET /logout` : parcours de connexion/déconnexion.
 
 Pour l'activer :
@@ -460,6 +531,11 @@ Pour l'activer :
    `DASHBOARD_HOST:DASHBOARD_PORT`.
 
 Le tableau de bord ne stocke aucune donnée de jeu séparée : il lit la même base SQLite que le bot.
+En développement (`ENVIRONMENT=development`), il s'affiche en **🧪 FreeGameDrop DEV**, avec un badge
+et un bandeau explicites, et `MAINTENANCE_MODE=true` y ajoute un avis de maintenance — impossible de
+le confondre avec l'interface de production. L'application Discord DEV a son propre `CLIENT_SECRET`
+et sa propre redirection (`http://localhost:8080/auth/callback`), voir
+[`ENVIRONMENTS.md`](ENVIRONMENTS.md) §6.
 
 **Sécurité du tableau de bord.**
 
@@ -490,11 +566,15 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
-| `DISCORD_TOKEN` | — | **Obligatoire.** Token du bot. |
-| `DB_PATH` | `bot.db` | Fichier SQLite. |
+| `ENVIRONMENT` | `production` | `development` ou `production` : identifie l'instance (journaux, titres du dashboard). Ne choisit jamais le token. |
+| `EXPECTED_ENVIRONMENT` | *(vide)* | Environnement attendu sur cette machine ; un écart avec `ENVIRONMENT` interdit le démarrage. |
+| `DISCORD_APPLICATION_ID` | — | Identifiant de l'application Discord de cet environnement, comparé au jeton. |
+| `MAINTENANCE_MODE` | `false` | Suspend la veille automatique et ses annonces (les commandes d'administration restent actives). |
+| `DISCORD_TOKEN` | — | **Obligatoire.** Token du bot (`.env` uniquement, jamais versionné). |
+| `DB_PATH` | `data/freegamedrop-dev.db` en DEV, `bot.db` en PROD | Fichier SQLite (dossier créé automatiquement). |
 | `CHECK_INTERVAL_HOURS` | `1` | Fréquence de vérification. |
 | `MAX_GAMES` | `10` | Jeux récents examinés à chaque tour. |
-| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `LOG_LEVEL` | `DEBUG` en DEV, `INFO` en PROD | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `LOG_FILE` | *(vide)* | Fichier de journal supplémentaire (rotation 5 Mo × 3) ; vide = sortie standard uniquement. |
 | `LOG_PSEUDONYMIZE_IDS` | `false` | Remplace les identifiants Discord par une empreinte stable dans les logs. |
 | `LOG_MAX_FIELD_CHARS` | `160` | Longueur maximale d'un champ dans les lignes `event=…`. |
@@ -533,7 +613,7 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `MEGA_DEAL_MIN_WORTH_EUR` | `19.99` | Seuil de valeur (en euros, libellée par la source) pour le bandeau « 🔥 Offre exceptionnelle ». `0` désactive. |
 | `DASHBOARD_ENABLED` | `false` | Démarre le tableau de bord web avec le bot. |
 | `DASHBOARD_HOST` / `DASHBOARD_PORT` | `0.0.0.0` / `8080` | Adresse d'écoute du tableau de bord. |
-| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | — | Identifiants OAuth2 de l'application Discord, nécessaires pour la connexion sur le tableau de bord. |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | — | Identifiants OAuth2 de l'application Discord, nécessaires pour la connexion sur le tableau de bord. `DISCORD_CLIENT_ID` doit être l'application du token. |
 | `DISCORD_OAUTH_REDIRECT_URI` | `DASHBOARD_BASE_URL/auth/callback` | URL de redirection OAuth2, doit correspondre à celle déclarée sur Discord. |
 | `DASHBOARD_COOKIE_SECURE` | auto (`true` si `DASHBOARD_BASE_URL` est en `https://`) | Ajoute l'attribut `Secure` aux cookies de session. À laisser activé dès que le tableau de bord est exposé publiquement en HTTPS. |
 
@@ -551,8 +631,10 @@ Les mots-clés sont cherchés en minuscules dans le champ `platforms` renvoyé p
 
 ```
 main.py                 point d'entrée : démarre le bot, les cogs et le tableau de bord optionnel
-config.py               toute la configuration (.env, plateformes, sources, alertes, dashboard)
+config.py               toute la configuration (.env, environnements, plateformes, sources, dashboard)
 database.py             stockage SQLite (configuration, annonces, catalogue, favoris, alertes, sessions)
+data/                   base SQLite de développement (`freegamedrop-dev.db`, ignorée par git)
+ENVIRONMENTS.md         guide DEV / PROD : applications Discord séparées, bases, volumes, checklist
 DESIGN.md               livre de marque : identité visuelle FreeGameDrop (couleurs, typo, embeds)
 ROADMAP.md              feuille de route des prochaines versions
 cogs/
@@ -564,6 +646,7 @@ services/
   epic_games.py          appel à l'API de l'Epic Games Store (et rien d'autre)
   offer_engine.py        agrège les sources, tolère les pannes, dédoublonne
 utils/
+  environment.py        garde-fou DEV / PROD (identité déclarée, jeton, application, base SQLite)
   design.py             design tokens de l'identité visuelle (couleurs, urgence, typo, boutons)
   platforms.py          reconnaître la plateforme d'un jeu
   offers.py             filtres de catalogue, préférences, offres exceptionnelles
@@ -579,8 +662,9 @@ web/
   dashboard.py           pages HTML et échanges OAuth2 Discord (logique pure, testable)
   dashboard_server.py    serveur aiohttp.web et routage
 tests/                  tests automatiques (pytest), sans token ni réseau
-.github/workflows/      intégration continue
-Dockerfile              image de production pour l'auto-hébergement
+.github/workflows/      intégration continue (ci.yml) et déploiement DEV (deploy-dev.yml)
+Dockerfile              image pour l'auto-hébergement
+docker-compose.dev.yml  environnement de développement (volume freegamedrop-dev-data)
 ```
 
 ---
@@ -610,8 +694,17 @@ Ils couvrent aussi les situations anormales, car c'est là que le bot se casse e
 | Journal | token, mot de passe, URL de webhook et e-mail jamais écrits, même dans une trace d'exception. |
 | Surveillance | source déclarée indisponible, retour à la normale, pic d'erreurs, tâche arrêtée, anti-spam des alertes. |
 
-L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` sur Python 3.10,
-3.11 et 3.12 à chaque `push` et chaque pull request.
+Le garde-fou DEV / PROD est testé comme le reste : `tests/test_environment.py` rejoue le refus de
+démarrage (jeton d'une autre application, base de production, environnement inattendu) **sur le vrai
+binaire** `main.py`, dans un processus séparé, sans réseau. `tests/test_maintenance.py` vérifie que
+le mode maintenance suspend la veille automatique sans bloquer `/test-jeux`.
+
+L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff`, `pytest` (Python 3.10, 3.11 et
+3.12), le garde-fou exécuté sur `main.py`, la construction de l'image Docker et la validation de
+`docker-compose.dev.yml`, à chaque `push` et chaque pull request. La porte unique **CI OK** résume
+ces contrôles : c'est elle qu'il faut exiger avant tout déploiement. Le déploiement DEV
+(`.github/workflows/deploy-dev.yml`) ne part qu'après une CI verte sur `main`, et seulement si la
+variable de dépôt `DEV_DEPLOY_ENABLED=true` et le secret `DEV_DEPLOY_WEBHOOK` sont définis.
 
 ---
 
@@ -629,6 +722,11 @@ L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` s
 | Aucune alerte de surveillance reçue | Vérifie `MONITOR_ENABLED`, `MONITOR_ALERT_CHANNEL_ID` (ou les messages privés du propriétaire), et `grep 'event=monitor.alert' bot.log`. |
 | Des lignes `***` dans les logs | C'est voulu : c'est une valeur sensible (token, clé, webhook, e-mail) masquée avant écriture. |
 | `DISCORD_TOKEN manquant` au démarrage | Le fichier `.env` est absent ou vide : `cp .env.example .env`. |
+| `❌ Discord application mismatch` | Le jeton appartient à une autre application que `DISCORD_APPLICATION_ID` / `DISCORD_CLIENT_ID`. Utilise le jeton de l'application de **cet** environnement (DEV et PROD ont chacune la sienne). |
+| `❌ Environment mismatch` | `ENVIRONMENT` et `EXPECTED_ENVIRONMENT` ne concordent pas : aligne les deux lignes du `.env`. |
+| `❌ Refus de démarrer … base de production` | `DB_PATH` désigne la base de l'autre environnement : mets `data/freegamedrop-dev.db` en DEV, `bot.db` (ou `/app/data/bot.db`) en PROD. |
+| `❌ ENVIRONMENT=… inconnu` | Écris exactement `development` ou `production` (les variantes `dev` / `prod` sont acceptées). |
+| Aucune annonce alors que tout est vert | `MAINTENANCE_MODE=true` suspend la veille : repasse à `false` (le journal indique `event=check.skipped reason=maintenance`). |
 
 ---
 

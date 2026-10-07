@@ -519,3 +519,45 @@ async def test_suppression_du_compte_efface_tout_et_deconnecte(client, db):
     assert await db.get_favorite_ids(42) == set()
     assert not (await db.get_user_notifications(42)).get("new_offer")
     assert await db.get_dashboard_session("tok-sess") is None
+
+
+# ---------- Environnement affiché ----------
+
+
+async def test_tableau_de_bord_dev_ne_ressemble_pas_a_la_production(client, monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+
+    text = await (await client.get("/")).text()
+
+    assert "FreeGameDrop DEV" in text
+    assert "🧪 DEV" in text
+    assert "environnement de développement" in text
+    assert "<title>🧪 FreeGameDrop DEV" in text
+
+
+async def test_tableau_de_bord_prod_garde_le_nom_public(client, monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+
+    text = await (await client.get("/")).text()
+
+    assert "<title>FreeGameDrop" in text
+    assert "FreeGameDrop DEV" not in text
+    assert "🧪 DEV" not in text
+
+
+async def test_tableau_de_bord_signale_la_maintenance(client, monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+    monkeypatch.setattr(config, "MAINTENANCE_MODE", True)
+
+    text = await (await client.get("/")).text()
+
+    assert "Maintenance : les annonces automatiques sont suspendues." in text
+
+
+async def test_api_health_expose_lenvironnement(client, db, monkeypatch):
+    """Un superviseur externe doit pouvoir distinguer DEV et PROD sur cette URL."""
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+
+    payload = await (await client.get("/api/health")).json()
+
+    assert payload["environment"] == "development"

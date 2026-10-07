@@ -155,3 +155,19 @@ async def test_suppression_des_donnees_utilisateur_isolee(db):
     assert await db.get_favorite_ids(43) == {"1"}
     remaining = await db.get_favorites(43)
     assert remaining[0]["title"] == "Jeu"
+
+
+async def test_init_db_cree_le_dossier_de_la_base(tmp_path, monkeypatch):
+    """`DB_PATH=data/freegamedrop-dev.db` doit fonctionner sur un dossier neuf."""
+    import database
+
+    chemin = tmp_path / "data" / "freegamedrop-dev.db"
+    monkeypatch.setattr(database, "DB_PATH", str(chemin))
+
+    await database.init_db()
+
+    assert chemin.exists(), "le dossier `data/` doit être créé au premier démarrage"
+
+    async with __import__("aiosqlite").connect(chemin) as conn:
+        curseur = await conn.execute("SELECT COUNT(*) FROM sent_items")
+        assert (await curseur.fetchone())[0] == 0

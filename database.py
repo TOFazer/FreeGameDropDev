@@ -1,5 +1,8 @@
 """Stockage SQLite : salons, rôles et annonces déjà envoyées."""
 
+import os
+from pathlib import Path
+
 import aiosqlite
 
 import config
@@ -9,7 +12,20 @@ from utils.offers import classify_offer_type, normalize_genres
 DB_PATH = config.DB_PATH
 
 
+def _ensure_parent_directory(path: str) -> None:
+    """Crée le dossier de la base (ex. `data/`) s'il n'existe pas encore.
+
+    `:memory:` et les chemins sans dossier (« bot.db ») ne déclenchent rien.
+    """
+    if not path or path == ":memory:" or path.startswith("file:"):
+        return
+    parent = Path(path).expanduser().parent
+    if str(parent) not in ("", "."):
+        os.makedirs(parent, exist_ok=True)
+
+
 async def init_db():
+    _ensure_parent_directory(DB_PATH)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """CREATE TABLE IF NOT EXISTS guilds (

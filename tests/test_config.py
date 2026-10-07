@@ -1,6 +1,7 @@
 """Lecture de la configuration (.env) et valeurs par défaut."""
 
 import config
+from utils import environment
 
 
 def test_valeurs_par_defaut():
@@ -40,3 +41,32 @@ def test_le_token_nest_jamais_dans_le_depot():
         source = f.read()
 
     assert 'DISCORD_TOKEN: str = _env_str("DISCORD_TOKEN")' in source
+
+
+def test_variables_denvironnement_exposees():
+    """Les quatre réglages du garde-fou DEV / PROD sont bien lus depuis `.env`."""
+    assert config.ENVIRONMENT in environment.KNOWN_ENVIRONMENTS
+    assert isinstance(config.EXPECTED_ENVIRONMENT, str)
+    assert config.DISCORD_APPLICATION_ID is None or isinstance(config.DISCORD_APPLICATION_ID, int)
+    assert isinstance(config.MAINTENANCE_MODE, bool)
+
+
+def test_lenvironnement_ne_choisit_pas_le_jeton():
+    """Le jeton vient toujours de `.env` : l'environnement ne fait que le contrôler.
+
+    Si quelqu'un ajoutait un jour un jeton de production dans le code au motif
+    « c'est la prod, c'est plus simple », ce test tomberait.
+    """
+    with open("config.py", encoding="utf-8") as f:
+        source = f.read()
+
+    assert 'DISCORD_TOKEN: str = _env_str("DISCORD_TOKEN")' in source
+    assert source.count('_env_str("DISCORD_TOKEN"') == 1, "un seul jeton : celui de `.env`"
+    assert 'ENVIRONMENT).DISCORD_TOKEN' not in source
+
+
+def test_la_base_par_defaut_suit_lenvironnement():
+    """Un fichier SQLite différent par environnement, sans configuration explicite."""
+    assert "dev" in environment.DEVELOPMENT_DEFAULT_DB.lower()
+    assert "dev" not in environment.PRODUCTION_DEFAULT_DB.lower()
+    assert config.DB_PATH  # dépend de l'environnement de la machine de test

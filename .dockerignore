@@ -3,9 +3,16 @@
 .venv
 .env
 *.db
+*.db-wal
+*.db-shm
+data
 __pycache__
 .pytest_cache
 .ruff_cache
 tests
+docker-compose.dev.yml
 README.md
 ROADMAP.md
+ENVIRONMENTS.md
+DESIGN.md
+PHASE1_VALIDATION.md

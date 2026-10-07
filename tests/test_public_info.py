@@ -54,3 +54,46 @@ def test_lien_dinvitation_ne_demande_pas_administrator():
     assert permissions.manage_channels
     assert permissions.manage_roles
     assert permissions.send_messages
+
+
+def test_info_affiche_lenvironnement_de_developpement(monkeypatch):
+    """En DEV, `/info` doit dire clairement où l'on se trouve."""
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+    monkeypatch.setattr(config, "DB_PATH", "data/freegamedrop-dev.db")
+    bot = SimpleNamespace(latency=0.042, guilds=[object()], user=SimpleNamespace(id=123))
+
+    embed = build_info_embed(bot)
+    fields = {field.name: field.value for field in embed.fields}
+
+    assert "🧪" in embed.title and "DEV" in embed.title
+    assert fields["Environnement"] == "🧪 Development"
+    assert fields["Latence"] == "42 ms"
+    assert fields["Serveurs"] == "1"
+    assert fields["Base de données"] == "SQLite · freegamedrop-dev.db"
+    assert "🔧 Maintenance" not in fields
+    assert "dev" in (embed.footer.text or "").lower()
+
+
+def test_info_en_production_ne_parle_pas_de_developpement(monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "DB_PATH", "bot.db")
+    bot = SimpleNamespace(latency=0.05, guilds=[], user=SimpleNamespace(id=123))
+
+    embed = build_info_embed(bot)
+    fields = {field.name: field.value for field in embed.fields}
+
+    assert embed.title == "🚀 FreeGameDrop"
+    assert fields["Environnement"] == "🚀 Production"
+    assert fields["Base de données"] == "SQLite"
+    assert "dev" not in embed.title.lower()
+
+
+def test_info_signale_le_mode_maintenance(monkeypatch):
+    monkeypatch.setattr(config, "MAINTENANCE_MODE", True)
+    bot = SimpleNamespace(latency=0.01, guilds=[], user=None)
+
+    embed = build_info_embed(bot)
+    fields = {field.name: field.value for field in embed.fields}
+
+    assert "🔧 Maintenance" in fields
+    assert "maintenance" in fields["🔧 Maintenance"].lower()

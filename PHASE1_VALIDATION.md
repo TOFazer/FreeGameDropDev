@@ -65,4 +65,18 @@ Les tests ne justifient donc pas une annonce « zéro bug connu » ou « prêt p
 - [ ] Demander `/free` plusieurs fois très vite et vérifier le message d'attente de la limite.
 - [ ] Lire le journal : aucun token, aucune adresse e-mail, aucune URL de webhook en clair.
 
-Commandes de contrôle : `pytest`, `ruff check .`, `git diff --check`.
+### Recette de séparation DEV / PROD (voir ENVIRONMENTS.md)
+
+- [ ] Démarrer avec un `DISCORD_APPLICATION_ID` étranger au jeton : le bot refuse de démarrer
+  (« ❌ Discord application mismatch ») sans tenter la moindre connexion.
+- [ ] Démarrer avec `ENVIRONMENT=development` et `DB_PATH=data/freegamedrop-prod.db` : refus.
+- [ ] Démarrer avec `ENVIRONMENT` ≠ `EXPECTED_ENVIRONMENT` : refus (`Environment mismatch`).
+- [ ] Démarrer normalement : les lignes `[DEVELOPMENT] …` annoncent environnement, base et
+  application ; `/info` affiche « 🧪 Development » ; le tableau de bord affiche 🧪 FreeGameDrop DEV.
+- [ ] Activer `MAINTENANCE_MODE=true` : la veille automatique ne publie plus rien
+  (`event=check.skipped`), `/test-jeux` fonctionne toujours.
+- [ ] Vérifier que `data/freegamedrop-dev.db` existe en local, que `git status` ne montre ni
+  `.env` ni `*.db`, et que le conteneur DEV utilise le volume `freegamedrop-dev-data`.
+
+Commandes de contrôle : `pytest`, `ruff check .`, `git diff --check`,
+`docker compose -f docker-compose.dev.yml config`.

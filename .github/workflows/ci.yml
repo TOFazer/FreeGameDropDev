@@ -4,7 +4,30 @@ on:
   push:
   pull_request:
 
+# Porte d'entrée unique : `CI OK` ne passe que si le style, les tests, le garde-fou
+# d'environnement et l'image Docker sont tous verts. Le déploiement DEV
+# (.github/workflows/deploy-dev.yml) attend cette porte.
 jobs:
+  lint:
+    name: Style (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Vérifier le style
+        run: ruff check .
+
   tests:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -27,8 +50,136 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Vérifier le style (ruff)
-        run: ruff check .
-
       - name: Lancer les tests
         run: pytest
+
+      - name: Vérifier que le dépôt ne contient aucun secret
+        run: |
+          if git grep -nE 'DISCORD_TOKEN=[^[:space:]]' -- ':!.env.example'; then
+            echo "❌ Un token ne doit jamais être versionné : il vit dans .env (ignoré par git)."
+            exit 1
+          fi
+          echo "✅ Aucun token dans le dépôt."
+
+  environment-guard:
+    name: Garde-fou DEV / PROD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Le bot DEV doit refuser un jeton de production
+        run: |
+          TOKEN=$(python -c "import base64; print(base64.urlsafe_b64encode(b'987654321098765432').decode().rstrip('=') + '.jeton.factice')")
+          set +e
+          sortie=$(ENVIRONMENT=development EXPECTED_ENVIRONMENT=development \
+            DISCORD_APPLICATION_ID=123456789012345678 \
+            DISCORD_TOKEN="$TOKEN" DB_PATH=data/freegamedrop-dev.db \
+            python main.py 2>&1)
+          code=$?
+          set -e
+          echo "$sortie"
+          test "$code" -ne 0 || { echo "❌ Le bot DEV a démarré avec un jeton d'une autre application."; exit 1; }
+          echo "$sortie" | grep -q "Discord application mismatch"
+          echo "✅ Jeton d'une autre application refusé."
+
+      - name: Le bot DEV doit refuser une base de production
+        run: |
+          TOKEN=$(python -c "import base64; print(base64.urlsafe_b64encode(b'123456789012345678').decode().rstrip('=') + '.jeton.factice')")
+          set +e
+          sortie=$(ENVIRONMENT=development EXPECTED_ENVIRONMENT=development \
+            DISCORD_APPLICATION_ID=123456789012345678 \
+            DISCORD_TOKEN="$TOKEN" DB_PATH=data/freegamedrop-prod.db \
+            python main.py 2>&1)
+          code=$?
+          set -e
+          echo "$sortie"
+          test "$code" -ne 0 || { echo "❌ Le bot DEV a démarré sur la base de production."; exit 1; }
+          echo "$sortie" | grep -q "base de production"
+          echo "✅ Base de production refusée en développement."
+
+      - name: Le modèle .env.example est cohérent pour le développement
+        run: |
+          cp .env.example .env
+          python - <<'PY'
+          import config
+          from utils import environment
+
+          resultat = environment.check(
+              environment=config.ENVIRONMENT,
+              expected=config.EXPECTED_ENVIRONMENT,
+              token=config.DISCORD_TOKEN,
+              application_id=config.DISCORD_APPLICATION_ID,
+              client_id=config.DISCORD_CLIENT_ID,
+              db_path=config.DB_PATH,
+          )
+          assert environment.normalize(config.ENVIRONMENT) == environment.DEVELOPMENT
+          assert environment.normalize(config.EXPECTED_ENVIRONMENT) == environment.DEVELOPMENT
+          assert config.DB_PATH == environment.DEVELOPMENT_DEFAULT_DB, config.DB_PATH
+          assert config.LOG_LEVEL == "DEBUG", config.LOG_LEVEL
+          assert config.MAINTENANCE_MODE is False
+          assert resultat.ok, resultat.errors
+          print("✅ Configuration de développement livrée : cohérente, garde-fou actif.")
+          PY
+
+  docker:
+    name: Image Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire l'image
+        run: docker build -t freegamedrop:ci .
+
+      - name: Le conteneur refuse un jeton d'une autre application
+        run: |
+          TOKEN=$(python3 -c "import base64; print(base64.urlsafe_b64encode(b'987654321098765432').decode().rstrip('=') + '.jeton.factice')")
+          set +e
+          sortie=$(docker run --rm \
+            -e ENVIRONMENT=development -e EXPECTED_ENVIRONMENT=development \
+            -e DISCORD_APPLICATION_ID=123456789012345678 -e DISCORD_TOKEN="$TOKEN" \
+            -e DB_PATH=/app/data/freegamedrop-dev.db freegamedrop:ci 2>&1)
+          code=$?
+          set -e
+          echo "$sortie"
+          test "$code" -ne 0 || { echo "❌ L'image a démarré avec la mauvaise application Discord."; exit 1; }
+          echo "$sortie" | grep -q "Discord application mismatch"
+          echo "✅ Garde-fou actif dans l'image Docker."
+
+      - name: Valider docker-compose.dev.yml
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.dev.yml config > /dev/null
+          docker compose -f docker-compose.dev.yml config | grep -q "freegamedrop-dev-data"
+          echo "✅ docker-compose.dev.yml valide (volume DEV dédié)."
+
+  ci-ok:
+    name: CI OK
+    runs-on: ubuntu-latest
+    needs: [lint, tests, environment-guard, docker]
+    if: always()
+    steps:
+      - name: Vérifier le résultat de tous les contrôles
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "tests=${{ needs.tests.result }}"
+          echo "environment-guard=${{ needs.environment-guard.result }}"
+          echo "docker=${{ needs.docker.result }}"
+          for resultat in "${{ needs.lint.result }}" "${{ needs.tests.result }}" \
+                           "${{ needs.environment-guard.result }}" "${{ needs.docker.result }}"; do
+            if [ "$resultat" != "success" ]; then
+              echo "❌ Un contrôle a échoué : aucun déploiement DEV ne doit partir."
+              exit 1
+            fi
+          done
+          echo "✅ Tests, style, garde-fou d'environnement et image Docker validés."

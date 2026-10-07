@@ -30,6 +30,7 @@ from enum import Enum
 
 import config
 import database
+from utils import environment
 from utils.logging_setup import log_event
 from utils.metrics import format_last_check
 
@@ -589,6 +590,9 @@ async def collect(bot=None, *, now: datetime | None = None) -> dict:
 
     return {
         "status": overall.value,
+        # Quel environnement répond : un tableau de supervision qui interroge cette URL
+        # ne doit jamais confondre l'instance DEV avec la production.
+        "environment": environment.current(),
         "generated_at": moment,
         "components": {
             "bot": Status.OK.value if bot is not None else Status.UNKNOWN.value,
@@ -614,7 +618,8 @@ def build_report(snapshot: dict, *, now: datetime | None = None) -> str:
     components = snapshot.get("components") or {}
     labels = snapshot.get("labels") or {}
 
-    lines = ["FreeGameDrop", "─" * 20]
+    lines = [f"{environment.emoji_of()} {environment.product_name()}", "─" * 20]
+    lines.append(f"Environnement      {environment.describe()}")
     bot_status_value = Status.OK if components.get("bot") == "ok" else Status.UNKNOWN
     lines.append(
         f"{STATUS_EMOJI[bot_status_value]} Bot              "

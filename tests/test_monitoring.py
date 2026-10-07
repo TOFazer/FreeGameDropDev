@@ -307,3 +307,15 @@ async def test_une_base_injoignable_apparait_en_rouge(db, monkeypatch):
     assert instantane["components"]["database"] == "down"
     assert instantane["status"] == "down"
     assert "🔴 Base de données" in rapport
+
+
+async def test_letat_de_sante_indique_lenvironnement(db, monkeypatch):
+    """`/sante` et `/api/health` doivent dire quel environnement répond."""
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+
+    instantane = await monitoring.collect(None, now=MAINTENANT)
+    rapport = monitoring.build_report(instantane, now=MAINTENANT)
+
+    assert instantane["environment"] == "development"
+    assert "🧪 Development" in rapport
+    assert "Environnement" in rapport
