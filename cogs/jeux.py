@@ -17,8 +17,9 @@ from discord.ext import commands, tasks
 import config
 import database
 from services import offer_engine
-from utils import branding, metrics, notifications, platforms
+from utils import branding, metrics, monitoring, notifications, platforms, rate_limits
 from utils.embeds import build_game_message, build_roles_embed, source_label
+from utils.logging_setup import log_event
 from utils.offers import filter_offers, normalize_genres, normalize_platforms
 from utils.permissions import (
     admin_note,
@@ -50,6 +51,12 @@ class RoleButton(discord.ui.Button):
         self.key = key
 
     async def callback(self, interaction: discord.Interaction):
+        decision, limit = rate_limits.consume_command_with_limit("roles", interaction)
+        if not decision.allowed:
+            await interaction.response.send_message(
+                rate_limits.format_limit_message(limit, decision.retry_after), ephemeral=True
+            )
+            return
         selected = await database.get_guild_platforms(interaction.guild.id)
         if selected is not None and self.key not in selected:
             await interaction.response.send_message(
@@ -403,6 +410,15 @@ class GameBrowserView(discord.ui.View):
                 ephemeral=True,
             )
             return False
+        decision = rate_limits.consume(rate_limits.LIMITS["interactions"], interaction.user.id)
+        if not decision.allowed:
+            await interaction.response.send_message(
+                rate_limits.format_limit_message(
+                    rate_limits.LIMITS["interactions"], decision.retry_after
+                ),
+                ephemeral=True,
+            )
+            return False
         return True
 
     async def change_page(self, interaction: discord.Interaction, direction: int):
@@ -516,10 +532,13 @@ class Jeux(commands.Cog):
         """Répond proprement aux refus de permission et aux erreurs de commande inattendues."""
         if isinstance(error, app_commands.MissingPermissions):
             message = "Cette commande est réservée aux administrateurs du serveur."
+        elif isinstance(error, rate_limits.RateLimited):
+            message = str(error)
         elif isinstance(error, app_commands.CommandOnCooldown):
             wait = max(1, math.ceil(error.retry_after))
             message = f"Réessaie dans {wait} seconde(s)."
         else:
+            monitoring.HEALTH.record_error()
             log.error(
                 "Erreur de commande /%s : %s",
                 getattr(interaction.command, "name", "inconnue"),
@@ -686,7 +705,9 @@ class Jeux(commands.Cog):
             except discord.HTTPException:
                 log.warning("Impossible de nettoyer les anciens panneaux sur le serveur %s", guild_id)
 
-        message = await channel.send(embed=build_roles_embed(), view=RolesView(keys))
+        message = await rate_limits.spaced_send(
+            channel.send, key=f"channel:{channel.id}", embed=build_roles_embed(), view=RolesView(keys)
+        )
         await database.set_roles_panel_message(guild_id, message.id)
 
     async def apply_setup(self, guild: discord.Guild, platform_keys: list, access_roles: list) -> str:
@@ -900,7 +921,12 @@ class Jeux(commands.Cog):
             if not permissions.view_channel or not permissions.send_messages:
                 continue
             try:
-                await channel.send(content=message, allowed_mentions=discord.AllowedMentions.none())
+                await rate_limits.spaced_send(
+                    channel.send,
+                    key=f"channel:{channel.id}",
+                    content=message,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
                 return
             except discord.HTTPException:
                 continue
@@ -945,7 +971,9 @@ class Jeux(commands.Cog):
 
     async def _run_check_once(self, *, target_guild_id: int | None = None) -> int:
         """Envoie les jeux gratuits pas encore annoncés. Retourne le nombre d'annonces."""
+        log_event("check.started", sources=len(config.OFFER_SOURCES))
         response = await offer_engine.fetch_offers()
+        log_event("check.fetched", offers=len(response))
         games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
         await database.save_giveaways(games)
         await database.set_bot_state("last_check_at", datetime.now(timezone.utc).isoformat())
@@ -978,7 +1006,9 @@ class Jeux(commands.Cog):
                 role_id = roles.get((guild_id, route))
                 content = f"<@&{role_id}> nouveau jeu gratuit !" if role_id else None
                 try:
-                    await channel.send(
+                    await rate_limits.spaced_send(
+                        channel.send,
+                        key=f"channel:{channel_id}",
                         content=content,
                         embed=embed,
                         view=view,
@@ -987,7 +1017,15 @@ class Jeux(commands.Cog):
                     await database.mark_sent(guild_id, sent_key)
                     sent += 1
                     announced_anywhere = True
+                    log_event(
+                        "announce.sent",
+                        offer_id=item_id,
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        platform=route,
+                    )
                 except discord.Forbidden as error:
+                    monitoring.HEALTH.record_error()
                     log.warning(
                         "Discord refuse l'envoi sur le serveur %s (vérifie Voir les salons, "
                         "Envoyer des messages et Intégrer des liens) : %s",
@@ -995,10 +1033,12 @@ class Jeux(commands.Cog):
                         error,
                     )
                 except discord.HTTPException as error:
+                    monitoring.HEALTH.record_error()
                     log.warning("Envoi impossible sur le serveur %s : %s", guild_id, error)
             if announced_anywhere:
                 new_games.append(game)
 
+        log_event("check.finished", announcements=sent, new_offers=len(new_games))
         if target_guild_id is not None:
             return sent
 
@@ -1015,13 +1055,25 @@ class Jeux(commands.Cog):
 
     @tasks.loop(hours=1)
     async def check_games(self):
+        interval = config.CHECK_INTERVAL_HOURS * 3600
         try:
             await self.run_check()
-        except Exception:
+        except Exception as error:
+            monitoring.HEALTH.record_task_run(
+                "check_games", interval_seconds=interval, error=f"{type(error).__name__}: {error}"
+            )
+            monitoring.HEALTH.record_error()
+            log_event("task.failure", level=logging.ERROR, task="check_games", error=error)
             log.exception("Erreur pendant la vérification des jeux")
+        else:
+            monitoring.HEALTH.record_task_run("check_games", interval_seconds=interval)
+            log_event("task.run", task="check_games")
 
     @check_games.before_loop
     async def before_check_games(self):
+        monitoring.HEALTH.register_task(
+            "check_games", interval_seconds=config.CHECK_INTERVAL_HOURS * 3600
+        )
         await self.bot.wait_until_ready()
 
     # ----- commandes -----
@@ -1046,7 +1098,7 @@ class Jeux(commands.Cog):
             app_commands.Choice(name="Se termine bientôt (24h)", value="ending_soon"),
         ],
     )
-    @app_commands.checks.cooldown(1, 15.0, key=lambda interaction: interaction.user.id)
+    @rate_limits.limited("free")
     async def free(
         self,
         interaction: discord.Interaction,
@@ -1057,7 +1109,7 @@ class Jeux(commands.Cog):
         """Liste les offres actuelles en privé et permet de les ajouter aux favoris."""
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            response = await offer_engine.fetch_offers()
+            response = await offer_engine.fetch_offers(use_cache=True)
         except Exception:
             log.exception("Impossible de récupérer les offres pour /free")
             await interaction.followup.send(
@@ -1096,21 +1148,8 @@ class Jeux(commands.Cog):
             embed=view.current_embed(), view=view, ephemeral=True, wait=True
         )
 
-    @free.error
-    async def free_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.CommandOnCooldown):
-            retry_after = max(1, math.ceil(error.retry_after))
-            message = f"Attends encore {retry_after} seconde(s) avant de relancer `/free`."
-        else:
-            log.error("Erreur pendant la commande /free : %s", error)
-            message = "La commande `/free` a rencontré une erreur. Réessaie un peu plus tard."
-
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
-
     @app_commands.command(name="favoris", description="Consulte et gère tes jeux favoris")
+    @rate_limits.limited("favoris")
     async def favoris(self, interaction: discord.Interaction):
         """Affiche la liste privée des favoris du compte Discord."""
         try:
@@ -1142,6 +1181,7 @@ class Jeux(commands.Cog):
     @app_commands.command(
         name="mes-donnees", description="Supprime les favoris associés à ton compte Discord"
     )
+    @rate_limits.limited("mes_donnees")
     async def mes_donnees(self, interaction: discord.Interaction):
         """Permet à un membre d'effacer ses données de favoris."""
         view = ConfirmDeleteDataView(interaction.user.id)
@@ -1169,6 +1209,7 @@ class Jeux(commands.Cog):
             for key, label in config.OFFER_TYPE_LABELS.items()
         ],
     )
+    @rate_limits.limited("historique")
     async def historique(
         self,
         interaction: discord.Interaction,
@@ -1192,6 +1233,7 @@ class Jeux(commands.Cog):
 
     @app_commands.command(name="recherche", description="Recherche une offre par titre ou description")
     @app_commands.describe(terme="Mot-clé à chercher")
+    @rate_limits.limited("recherche")
     async def recherche(self, interaction: discord.Interaction, terme: str):
         games = await database.search_giveaways(terme, limit=20)
         if not games:
@@ -1215,6 +1257,7 @@ class Jeux(commands.Cog):
         plateformes="Plateformes séparées par une virgule (ex : steam,epic,gog,ubisoft) ; vide = toutes",
         fuseau="Fuseau horaire IANA (ex : Europe/Paris), vide pour revenir au défaut",
     )
+    @rate_limits.limited("preferences")
     async def preferences(
         self,
         interaction: discord.Interaction,
@@ -1274,6 +1317,7 @@ class Jeux(commands.Cog):
             for key, label in {**config.USER_NOTIFICATION_EVENT_LABELS}.items()
         ]
     )
+    @rate_limits.limited("alertes")
     async def alertes(self, interaction: discord.Interaction, type: str, active: bool):
         await database.set_user_notification(interaction.user.id, type, active)
         label = config.USER_NOTIFICATION_EVENT_LABELS.get(type, type)
@@ -1287,8 +1331,9 @@ class Jeux(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
-    @app_commands.checks.has_permissions(administrator=True)
     @app_commands.describe(salon="Salon qui recevra les rappels (par défaut : ce salon)")
+    @rate_limits.limited("admin")
+    @app_commands.checks.has_permissions(administrator=True)
     async def rappel_salon(
         self, interaction: discord.Interaction, salon: discord.TextChannel | None = None
     ):
@@ -1302,6 +1347,7 @@ class Jeux(commands.Cog):
     @app_commands.command(
         name="dev-stats", description="Statistiques internes du bot (réservé au développeur)"
     )
+    @rate_limits.limited("admin")
     async def dev_stats(self, interaction: discord.Interaction):
         if not await self.bot.is_owner(interaction.user):
             await interaction.response.send_message(
@@ -1347,6 +1393,7 @@ class Jeux(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_auto(self, interaction: discord.Interaction):
         await self.show_config_panel(interaction)
@@ -1354,6 +1401,7 @@ class Jeux(commands.Cog):
     @app_commands.command(name="config", description="Ouvre le panneau de configuration du serveur")
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin")
     @app_commands.checks.has_permissions(administrator=True)
     async def config_panel(self, interaction: discord.Interaction):
         await self.show_config_panel(interaction)
@@ -1364,6 +1412,7 @@ class Jeux(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin")
     @app_commands.checks.has_permissions(administrator=True)
     async def acces_salon_roles(self, interaction: discord.Interaction):
         view = AccessView(self, await self.saved_access_roles(interaction.guild))
@@ -1380,6 +1429,7 @@ class Jeux(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin_heavy")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_all(self, interaction: discord.Interaction):
         await interaction.response.send_message(
@@ -1395,6 +1445,7 @@ class Jeux(commands.Cog):
     )
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin_heavy")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_jeux(self, interaction: discord.Interaction):
         await database.clear_sent(interaction.guild.id)
@@ -1405,6 +1456,7 @@ class Jeux(commands.Cog):
     @app_commands.command(name="test-jeux", description="Force une vérification des jeux gratuits")
     @app_commands.default_permissions(administrator=True)
     @app_commands.guild_only()
+    @rate_limits.limited("admin_heavy")
     @app_commands.checks.has_permissions(administrator=True)
     async def test_jeux(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

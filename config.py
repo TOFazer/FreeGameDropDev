@@ -51,6 +51,17 @@ TEST_GUILD_ID: int | None = _env_int("TEST_GUILD_ID", 1391429196105912452) or No
 
 LOG_LEVEL: str = _env_str("LOG_LEVEL", "INFO").upper()
 
+# Fichier de journal supplémentaire (rotation automatique, 5 Mo × 3). Vide = sortie
+# standard uniquement. Les secrets y sont masqués de la même façon que sur la sortie.
+LOG_FILE: str = _env_str("LOG_FILE")
+
+# Remplace les identifiants Discord (membres, serveurs) par une empreinte stable dans
+# les logs. À activer si un journal doit sortir de l'infrastructure du bot.
+LOG_PSEUDONYMIZE_IDS: bool = _env_bool("LOG_PSEUDONYMIZE_IDS", False)
+
+# Longueur maximale d'un champ dans les lignes `event=…` (au-delà : tronqué).
+LOG_MAX_FIELD_CHARS: int = _env_int("LOG_MAX_FIELD_CHARS", 160)
+
 # Liens affichés dans la commande /info.
 PROJECT_URL: str = _env_str("PROJECT_URL", "https://github.com/TOFazer/freegamedrop")
 SUPPORT_URL: str = _env_str("SUPPORT_URL", f"{PROJECT_URL}/issues")
@@ -95,6 +106,49 @@ OFFER_SOURCES: tuple = tuple(
     if source.strip()
 )
 OFFER_SOURCE_TIMEOUT: float = _env_float("OFFER_SOURCE_TIMEOUT", 20.0)
+
+# Durée pendant laquelle les offres déjà récupérées sont réutilisées pour /free :
+# plusieurs membres peuvent consulter le catalogue sans marteler les sources.
+OFFER_CACHE_SECONDS: float = _env_float("OFFER_CACHE_SECONDS", 60.0)
+
+
+# ---------- Limites de débit ----------
+
+# Ces limites n'existent que pour protéger les sources et l'API Discord : elles sont
+# volontairement larges. Le détail par commande est dans `utils/rate_limits.py`.
+RATE_LIMIT_USER_PER_MINUTE: int = _env_int("RATE_LIMIT_USER_PER_MINUTE", 20)
+RATE_LIMIT_FREE_PER_MINUTE: int = _env_int("RATE_LIMIT_FREE_PER_MINUTE", 4)
+RATE_LIMIT_ADMIN_PER_MINUTE: int = _env_int("RATE_LIMIT_ADMIN_PER_MINUTE", 6)
+RATE_LIMIT_ADMIN_HEAVY_PER_10_MINUTES: int = _env_int("RATE_LIMIT_ADMIN_HEAVY_PER_10_MINUTES", 3)
+
+# Espacement minimal entre deux messages envoyés dans un même salon ou à un même membre.
+# Respecte les limites de cadence de Discord sans jamais retarder une annonce isolée.
+DISCORD_SEND_INTERVAL_SECONDS: float = _env_float("DISCORD_SEND_INTERVAL_SECONDS", 0.4)
+
+
+# ---------- Monitoring ----------
+
+# Surveillance interne : état des composants, alerte si une source tombe, si une
+# tâche s'arrête, si la base ne répond plus ou si les erreurs s'accumulent.
+MONITOR_ENABLED: bool = _env_bool("MONITOR_ENABLED", True)
+MONITOR_INTERVAL_MINUTES: float = _env_float("MONITOR_INTERVAL_MINUTES", 5.0)
+
+# Salon qui reçoit les alertes de surveillance. Vide = message privé au propriétaire.
+MONITOR_ALERT_CHANNEL_ID: int | None = _env_int("MONITOR_ALERT_CHANNEL_ID", 0) or None
+# Destinataire des alertes si aucun salon n'est configuré (0 = propriétaire du bot).
+MONITOR_OWNER_ID: int | None = _env_int("MONITOR_OWNER_ID", 0) or None
+
+# Une source qui n'a plus réussi depuis ce délai est considérée comme indisponible.
+SOURCE_DOWN_AFTER_MINUTES: float = _env_float("SOURCE_DOWN_AFTER_MINUTES", 10.0)
+# Deux alertes identiques ne sont pas répétées avant ce délai.
+MONITOR_ALERT_COOLDOWN_MINUTES: float = _env_float("MONITOR_ALERT_COOLDOWN_MINUTES", 30.0)
+# Pic d'erreurs : seuil atteint sur la fenêtre glissante.
+MONITOR_ERROR_WINDOW_MINUTES: float = _env_float("MONITOR_ERROR_WINDOW_MINUTES", 15.0)
+MONITOR_ERROR_ALERT_THRESHOLD: int = _env_int("MONITOR_ERROR_ALERT_THRESHOLD", 10)
+# Marge accordée à une tâche avant de la considérer comme arrêtée.
+MONITOR_TASK_GRACE_MINUTES: float = _env_float("MONITOR_TASK_GRACE_MINUTES", 10.0)
+# Latence Discord (ms) au-delà de laquelle la connexion est signalée comme dégradée.
+MONITOR_LATENCY_WARN_MS: int = _env_int("MONITOR_LATENCY_WARN_MS", 1000)
 
 
 # ---------- Fuseau horaire par défaut ----------

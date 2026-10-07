@@ -22,6 +22,13 @@ pas une garantie validée par les tests unitaires.
 - Invitation et dashboard partagent les permissions minimales. Lecture d'historique et modération facultatives.
 - Données Epic malformées isolées ; identifiants absents ignorés ; liste de sources vide respectée.
 - Les trois types d'alertes continuent indépendamment si l'un échoue.
+- Journal d'événements `event=… clé=valeur` : appels de source, succès, délais dépassés, offres
+  détectées/écartées/dupliquées, annonces et alertes ; secrets masqués avant écriture.
+- Limites de débit par membre et par serveur, espacement des envois Discord et reprise après `429`.
+- Surveillance : `/sante` et `/api/health` distinguent une source indisponible d'une source sans
+  offre (dernier succès, nombre d'offres, latence, erreurs), avec alertes et rétablissement.
+- Anti faux positifs : une offre terminée, non active selon sa source ou sans titre n'est plus
+  annoncée ; chaque rejet est journalisé avec son motif.
 
 ## Registre des points ouverts — lancement non certifié
 
@@ -29,11 +36,11 @@ pas une garantie validée par les tests unitaires.
 | --- | --- | --- |
 | Important | Crash entre une création Discord et l'écriture SQLite | Pas de transaction distribuée. Un salon orphelin homonyme est refusé proprement ; le renommer avant reprise. |
 | Important | Envoi Discord réussi puis crash avant mémorisation | Doublon possible après redémarrage ; les verrous ne couvrent qu'un processus. N'exécuter qu'une instance sur la base. |
-| Important | Source indisponible et source sans offre renvoient toutes deux une liste vide | Les logs distinguent les pannes, mais pas encore d'indicateur utilisateur fiable par source. Ne pas afficher de faux voyant vert par plateforme. |
 | Important | `/reset-all` partiellement refusé | La configuration est encore effacée même si des ressources n'ont pas été supprimées. Vérifier/nettoyer les ressources avant de relancer. |
 | Important | Notifications personnelles « fin proche » | Le filtre temporel existant doit être revu avant de certifier cette fonctionnalité. |
 | Mineur | Redémarrage alors qu'un panneau éphémère est ouvert | Le panneau ne reprend pas : relancer `/setup-auto`. Les identifiants enregistrés sont conservés. |
 | Mineur | Ancien panneau sans identifiant enregistré, sans lecture d'historique | Un nouveau panneau est publié ; supprimer manuellement l'ancien si nécessaire. |
+| Mineur | Alertes de surveillance reçues uniquement si Discord répond | Si Discord est coupé, l'alerte reste dans le journal et `/api/health` prend le relais (supervision externe). Aucun envoi hors Discord n'est prévu. |
 
 Les tests ne justifient donc pas une annonce « zéro bug connu » ou « prêt pour lancement ».
 
@@ -52,5 +59,10 @@ Les tests ne justifient donc pas une annonce « zéro bug connu » ou « prêt p
 - [ ] Provoquer une panne Epic puis GamerPower : vérifier que l'autre source continue.
 - [ ] Tester les homonymes ; aucun salon existant non enregistré ne doit être modifié.
 - [ ] Redémarrer pendant le setup : relancer la commande et inspecter les éventuels éléments orphelins.
+- [ ] `/sante` : vérifier les lignes Bot/Discord/Base/Sources et la cohérence des horodatages.
+- [ ] Configurer un salon d'alertes, provoquer une panne de source et vérifier l'alerte puis le
+  message de rétablissement (et l'absence de répétition avant le délai anti-spam).
+- [ ] Demander `/free` plusieurs fois très vite et vérifier le message d'attente de la limite.
+- [ ] Lire le journal : aucun token, aucune adresse e-mail, aucune URL de webhook en clair.
 
 Commandes de contrôle : `pytest`, `ruff check .`, `git diff --check`.

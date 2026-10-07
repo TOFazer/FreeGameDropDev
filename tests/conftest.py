@@ -12,7 +12,8 @@ import pytest
 
 import database
 from cogs.jeux import Jeux
-from services import epic_games
+from services import epic_games, offer_engine
+from utils import monitoring, rate_limits
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +30,37 @@ def _no_real_epic_calls(request, monkeypatch):
         return []
 
     monkeypatch.setattr(epic_games, "fetch_giveaways", _empty)
+
+
+@pytest.fixture(autouse=True)
+def _no_send_spacing(monkeypatch):
+    """Les tests simulent Discord en mémoire : aucun espacement d'envoi nécessaire."""
+    monkeypatch.setattr(rate_limits.DISCORD_THROTTLE, "interval_seconds", 0.0)
+    rate_limits.DISCORD_THROTTLE.reset()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Chaque test repart avec des compteurs de limite vierges."""
+    rate_limits.RATE_LIMITER.reset()
+    yield
+    rate_limits.RATE_LIMITER.reset()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_health(monkeypatch):
+    """Chaque test repart avec une surveillance vierge (aucun état partagé)."""
+    monkeypatch.setattr(monitoring, "HEALTH", monitoring.HealthRegistry())
+
+
+@pytest.fixture(autouse=True)
+def _empty_offer_cache():
+    """Le cache d'offres ne doit jamais fuiter d'un test à l'autre."""
+    offer_engine.clear_cache()
+    offer_engine._inflight = None
+    yield
+    offer_engine.clear_cache()
+    offer_engine._inflight = None
 
 
 class FakeRole:

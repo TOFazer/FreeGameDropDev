@@ -110,6 +110,7 @@ Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 - [Commandes](#commandes)
 - [Données et confidentialité](#données-et-confidentialité)
 - [Fonctionnement](#fonctionnement)
+- [Journal, limites et surveillance](#journal-limites-et-surveillance)
 - [Tableau de bord web](#tableau-de-bord-web)
 - [Feuille de route](#feuille-de-route)
 - [Configuration](#configuration)
@@ -253,6 +254,15 @@ Puis, sur le serveur Discord : `/setup-auto`.
   offre suivie se termine.
 - **Statistiques publiques** : `/stats` affiche les offres détectées, actives, la valeur
   cumulée connue et la dernière vérification — uniquement des chiffres réellement mesurés.
+- **Veille technique** : `/sante` montre l'état réel du bot, de Discord, de la base et de chaque
+  source d'offres (🟢 / 🟠 / 🔴) ; les alertes automatiques préviennent quand une source tombe,
+  quand une tâche s'arrête, quand la base ne répond plus ou quand les erreurs s'accumulent.
+- **Limites raisonnables** : un quota par membre pour les commandes, un quota par serveur pour les
+  actions administratives, un espacement des envois Discord — un membre normal ne les remarque
+  jamais, un abus est ralenti.
+- **Journal de bord sûr** : chaque étape est journalisée (`event=source.failure source=epic …`)
+  pour pouvoir répondre à « pourquoi cette offre n'est pas arrivée ? », sans jamais écrire de
+  token, de mot de passe ni de donnée personnelle inutile.
 - **Boucle virale intégrée** : chaque annonce se termine par le pied de page « 🎁 FreeGameDrop »
   et un bouton « ➕ Ajouter FreeGameDrop ».
 - **Tableau de bord web optionnel** avec connexion Discord (OAuth2) et statistiques publiques
@@ -276,7 +286,7 @@ Les commandes de configuration sont réservées aux administrateurs. Les command
 | `/test-jeux` | Admin | Force une vérification immédiate des jeux gratuits. |
 | `/reset-jeux` | Admin | Vide l'historique des envois : les jeux récents peuvent être réannoncés. |
 | `/reset-all` | Admin | Supprime tout ce que le bot a créé (salons, rôles, catégorie, messages). Demande confirmation. |
-| `/free` | Tout le monde | Parcourt les offres agrégées (GamerPower, Epic Games Store, …), avec filtres optionnels par plateforme, type d'offre et échéance. La réponse est éphémère ; les boutons permettent de parcourir et d'enregistrer un favori. Limite d'une requête par utilisateur toutes les 15 secondes. |
+| `/free` | Tout le monde | Parcourt les offres agrégées (GamerPower, Epic Games Store, …), avec filtres optionnels par plateforme, type d'offre et échéance. La réponse est éphémère ; les boutons permettent de parcourir et d'enregistrer un favori. Les offres sont mises en cache une minute (`OFFER_CACHE_SECONDS`) et limitées à quelques requêtes par membre et par minute. |
 | `/favoris` | Tout le monde | Affiche ses favoris en privé ; le bouton permet de retirer une offre. |
 | `/historique` | Tout le monde | Revoit les dernières offres connues du bot, avec les mêmes filtres que `/free`. |
 | `/recherche` | Tout le monde | Recherche une offre déjà connue par titre ou description. |
@@ -285,6 +295,7 @@ Les commandes de configuration sont réservées aux administrateurs. Les command
 | `/stats` | Tout le monde | Les chiffres publics du bot : offres détectées, offres actives, valeur connue, plateformes suivies, dernière vérification. |
 | `/mes-donnees` | Tout le monde | Demande confirmation puis supprime les favoris associés au compte Discord. |
 | `/rappel-salon` | Admin | Choisit le salon qui reçoit un rappel pour les offres qui se terminent le jour même. |
+| `/sante` | Tout le monde | État mesuré du bot, de Discord, de la base et des sources d'offres, en réponse privée. Aucun secret, aucune donnée personnelle. |
 | `/dev-stats` | Développeur du bot | Statistiques internes (serveurs, offres suivies, favoris) ; réservé au propriétaire de l'application Discord. |
 | `/ping` | Tout le monde | Vérifie que le bot répond et affiche sa latence. |
 | `/info` | Tout le monde | Affiche la latence, le nombre de serveurs et les liens utiles. |
@@ -300,8 +311,14 @@ Le bot utilise SQLite (`DB_PATH`) et conserve :
 - pour les favoris, l'identifiant Discord du membre, l'identifiant de l'offre et la date d'ajout ;
 - pour les préférences et alertes personnelles (`/preferences`, `/alertes`), les réglages choisis, liés uniquement à l'identifiant Discord du membre ;
 - un historique minimal des alertes déjà envoyées (membre, offre, type d'alerte) pour éviter les doublons et respecter un délai minimal entre deux alertes identiques ;
-- la date de la dernière vérification des sources, pour `/stats` ;
+- la date de la dernière vérification des sources, pour `/stats`, et un battement de cœur de la
+  surveillance (`monitor_heartbeat_at`), pour qu'un service externe voie que le bot tourne ;
 - si le tableau de bord web est activé, une session de connexion temporaire (identifiant Discord, pseudo, expiration, jeton anti-CSRF et instantané des serveurs gérables — jamais le jeton OAuth Discord) créée après une connexion OAuth2 réussie.
+
+Les journaux ne contiennent ni token, ni mot de passe, ni clé d'API, ni adresse e-mail, ni contenu
+de message : ces valeurs sont masquées avant écriture (`utils/logging_setup.py`), y compris dans les
+traces d'exception. Les identifiants Discord peuvent être remplacés par une empreinte
+(`LOG_PSEUDONYMIZE_IDS=true`) si le journal doit sortir de ton infrastructure.
 
 Le bot ne stocke pas les messages privés, les messages des membres ni la preuve qu'un jeu a été réclamé. Les réponses de `/free`, `/favoris`, `/historique` et `/recherche` sont éphémères. Les offres publiques non favorites sont supprimées du catalogue après 90 jours sans nouvelle observation ; celles gardées en favori restent jusqu'au retrait du favori ou à la suppression des données.
 
@@ -317,7 +334,11 @@ Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confir
       services/gamerpower.py ──► API GamerPower
       services/epic_games.py ──► API Epic Games Store
                         │
-              services/offer_engine.py   agrégation, tolérance de panne
+              services/offer_engine.py   agrégation, vérification, cache court
+                        │               (une source en panne est ignorée, l'état est
+                        │                enregistré pour /sante et les alertes)
+                        │
+                 utils/monitoring.py état des sources, seuils, alertes
                         │
                  utils/platforms.py   « PC (Steam) » → steam
                         │
@@ -335,6 +356,70 @@ Deux subtilités Discord sont gérées dans `utils/permissions.py` :
    réglage est donc filtré par ce que le bot a réellement ;
 2. les administrateurs ignorent les permissions de salon — leurs messages sont donc supprimés
    par le bot.
+
+---
+
+## Journal, limites et surveillance
+
+Trois mécanismes complémentaires, tous hors ligne et sans dépendance supplémentaire.
+
+**Limites de débit** (`utils/rate_limits.py`) — le but n'est pas de gêner, mais d'éviter qu'un
+compte fasse exploser le nombre d'appels :
+
+| Portée | Exemples | Valeur par défaut |
+| --- | --- | --- |
+| Par membre | `/free` (4/min), `/recherche` (8/min), boutons (60/min) | `RATE_LIMIT_FREE_PER_MINUTE`, `RATE_LIMIT_USER_PER_MINUTE` |
+| Par serveur | `/setup-auto`, `/config`, `/acces-salon-roles`, `/rappel-salon` (6/min) | `RATE_LIMIT_ADMIN_PER_MINUTE` |
+| Par serveur, actions lourdes | `/test-jeux`, `/reset-jeux`, `/reset-all` (3/10 min) | `RATE_LIMIT_ADMIN_HEAVY_PER_10_MINUTES` |
+| Appels aux sources | cache d'une minute + appel unique partagé entre commandes simultanées | `OFFER_CACHE_SECONDS` |
+| Envois Discord | espacement entre deux messages d'un même salon, une reprise après un `429` | `DISCORD_SEND_INTERVAL_SECONDS` |
+
+**Journal de bord** (`utils/logging_setup.py`) — chaque étape utile produit une ligne
+`event=… clé=valeur`, facile à filtrer :
+
+```bash
+grep 'event=source' bot.log        # appels, succès, délais dépassés, pannes
+grep 'offer.rejected' bot.log      # offres écartées, avec le motif
+grep 'event=monitor.alert' bot.log # alertes de surveillance
+```
+
+Les secrets sont masqués **avant** l'écriture (token, clé OAuth, clé du tableau de bord, URL de
+webhook, `Authorization`, `code=` OAuth2, adresses e-mail), y compris dans les traces
+d'exception. Le contenu des messages Discord n'est jamais journalisé. `LOG_FILE` ajoute un
+fichier à rotation (5 Mo × 3) et `LOG_PSEUDONYMIZE_IDS=true` remplace les identifiants Discord
+par une empreinte stable.
+
+**Surveillance** (`utils/monitoring.py`, `cogs/sante.py`) — `/sante` affiche l'état mesuré :
+
+```
+FreeGameDrop
+────────────────────
+🟢 Bot              en ligne
+🟢 Discord          connecté (latence 42 ms)
+🟢 Base de données  saine (2 ms)
+
+Sources
+🟢 gamerpower — OK · dernier succès : il y a 2 min · 12 offre(s)
+🟢 epic       — OK · dernier succès : il y a 2 min · 3 offre(s)
+
+Dernière vérification : il y a 2 min
+Erreurs (15 dernières minutes) : 0
+```
+
+Une alerte part automatiquement quand :
+
+- une source n'a plus réussi depuis `SOURCE_DOWN_AFTER_MINUTES` (les autres continuent) ;
+- la base de données ne répond plus au ping ;
+- une tâche de fond n'a pas tourné depuis son intervalle + `MONITOR_TASK_GRACE_MINUTES` ;
+- la connexion Discord est perdue ou très lente ;
+- le nombre d'erreurs dépasse `MONITOR_ERROR_ALERT_THRESHOLD` sur
+  `MONITOR_ERROR_WINDOW_MINUTES`.
+
+Une même alerte n'est pas répétée avant `MONITOR_ALERT_COOLDOWN_MINUTES`, et le retour à la
+normale envoie un message de rétablissement. Les alertes vont dans `MONITOR_ALERT_CHANNEL_ID`
+ou, à défaut, en message privé au propriétaire du bot. Sans destinataire joignable (Discord
+coupé), elles restent dans le journal — et `/api/health` permet à un service externe de voir
+que le bot ne répond plus du tout.
 
 ---
 
@@ -356,6 +441,9 @@ paquet supplémentaire requis) sert de **centre de configuration** de FreeGameDr
   réglages que `/alertes` et `/preferences` sur Discord.
 - `GET /compte`, `POST /compte/supprimer` : résumé des données conservées et suppression complète.
 - `GET /api/stats` : les statistiques globales en JSON.
+- `GET /health` et `GET /api/health` : l'état mesuré du bot en JSON (composants, sources,
+  tâches, erreurs récentes, horodatages) — à brancher sur un service de supervision externe.
+  Aucun secret n'y figure.
 - `GET /login`, `GET /auth/callback`, `GET /logout` : parcours de connexion/déconnexion.
 
 Pour l'activer :
@@ -403,6 +491,9 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `CHECK_INTERVAL_HOURS` | `1` | Fréquence de vérification. |
 | `MAX_GAMES` | `10` | Jeux récents examinés à chaque tour. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `LOG_FILE` | *(vide)* | Fichier de journal supplémentaire (rotation 5 Mo × 3) ; vide = sortie standard uniquement. |
+| `LOG_PSEUDONYMIZE_IDS` | `false` | Remplace les identifiants Discord par une empreinte stable dans les logs. |
+| `LOG_MAX_FIELD_CHARS` | `160` | Longueur maximale d'un champ dans les lignes `event=…`. |
 | `PROJECT_URL` | dépôt GitHub | Lien du projet affiché par `/info`. |
 | `SUPPORT_URL` | page Issues GitHub | Lien de support affiché par `/info`. |
 | `VOTE_URL` | *(vide)* | Lien de vote affiché par `/info`, si le bot est référencé sur un annuaire. |
@@ -416,6 +507,22 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `EPIC_LOCALE` / `EPIC_COUNTRY` | `fr-FR` / `FR` | Langue et pays utilisés pour interroger l'Epic Games Store. |
 | `OFFER_SOURCES` | `gamerpower,epic` | Sources activées pour `/free`, les alertes et la veille automatique. |
 | `OFFER_SOURCE_TIMEOUT` | `20` | Délai maximal accordé à chaque source avant de l'ignorer pour ce tour. |
+| `OFFER_CACHE_SECONDS` | `60` | Durée de réutilisation des offres pour `/free` (un seul appel partagé entre commandes simultanées). |
+| `RATE_LIMIT_USER_PER_MINUTE` | `20` | Plafond, par membre, toutes commandes de lecture confondues. |
+| `RATE_LIMIT_FREE_PER_MINUTE` | `4` | Appels de `/free` par membre et par minute. |
+| `RATE_LIMIT_ADMIN_PER_MINUTE` | `6` | Actions de configuration par serveur et par minute. |
+| `RATE_LIMIT_ADMIN_HEAVY_PER_10_MINUTES` | `3` | Tests et réinitialisations par serveur, sur 10 minutes. |
+| `DISCORD_SEND_INTERVAL_SECONDS` | `0.4` | Espacement minimal entre deux messages d'un même salon ou à un même membre. |
+| `MONITOR_ENABLED` | `true` | Active la boucle de surveillance et ses alertes. |
+| `MONITOR_INTERVAL_MINUTES` | `5` | Fréquence des contrôles de surveillance. |
+| `MONITOR_ALERT_CHANNEL_ID` | *(vide)* | Salon qui reçoit les alertes de surveillance ; vide = message privé au propriétaire. |
+| `MONITOR_OWNER_ID` | *(vide)* | Destinataire de secours des alertes ; vide = propriétaire du bot. |
+| `SOURCE_DOWN_AFTER_MINUTES` | `10` | Délai sans succès au-delà duquel une source est déclarée indisponible. |
+| `MONITOR_ALERT_COOLDOWN_MINUTES` | `30` | Délai minimal entre deux alertes identiques. |
+| `MONITOR_ERROR_WINDOW_MINUTES` | `15` | Fenêtre glissante du comptage d'erreurs. |
+| `MONITOR_ERROR_ALERT_THRESHOLD` | `10` | Nombre d'erreurs dans la fenêtre qui déclenche l'alerte « pic d'erreurs ». |
+| `MONITOR_TASK_GRACE_MINUTES` | `10` | Marge accordée à une tâche avant de la signaler comme arrêtée. |
+| `MONITOR_LATENCY_WARN_MS` | `1000` | Latence Discord au-delà de laquelle la connexion est signalée comme dégradée. |
 | `DEFAULT_TIMEZONE` | `Europe/Paris` | Fuseau horaire par défaut des filtres de date de `/free`. |
 | `ALERT_CADENCE_HOURS` | `1` | Délai minimal entre deux alertes DM identiques pour un même membre. |
 | `LAST_DAY_HOURS` | `24` | Fenêtre considérée comme « se termine bientôt ». |
@@ -445,6 +552,7 @@ database.py             stockage SQLite (configuration, annonces, catalogue, fav
 cogs/
   jeux.py               commandes, menus, navigation des offres, boucle de vérification
   setup.py              /ping, /info et /stats
+  sante.py              /sante et boucle d'alertes de surveillance
 ROADMAP.md              feuille de route des prochaines versions
 services/
   gamerpower.py         appel à l'API GamerPower (et rien d'autre)
@@ -457,6 +565,9 @@ utils/
   branding.py           lien d'invitation partagé (/info, /stats, annonces)
   notifications.py       alertes DM personnelles et rappels serveur
   metrics.py             statistiques internes (/dev-stats) et publiques (/stats)
+  rate_limits.py         quotas par membre/serveur et espacement des envois Discord
+  logging_setup.py       journal d'événements sûr (secrets masqués avant écriture)
+  monitoring.py          état des composants, seuils d'alerte et rapport /sante
   permissions.py        calculer les permissions des salons
 web/
   dashboard.py           pages HTML et échanges OAuth2 Discord (logique pure, testable)
@@ -481,6 +592,18 @@ Les tests simulent un serveur Discord complet en mémoire (`tests/conftest.py`) 
 `/setup-auto`, vérifient les permissions appliquées, le routage des annonces et la modération du
 salon des rôles — **sans token ni appel réseau**.
 
+Ils couvrent aussi les situations anormales, car c'est là que le bot se casse en vrai :
+
+| Famille | Exemples couverts |
+| --- | --- |
+| Pannes de source | API en erreur, réponse illisible, format inattendu, délai d'attente dépassé — les autres sources continuent (`tests/test_source_reliability.py`, `tests/test_offer_engine.py`). |
+| Faux positifs | offre terminée, statut « non active » annoncé par la source, remise non nulle, lien invalide : jamais annoncés. |
+| Base de données | ping en échec : alerte envoyée, rapport passé au rouge, bot qui continue de tourner. |
+| Discord | salon supprimé, permissions refusées, `429 Too Many Requests` (une seule reprise). |
+| Limites | quotas par membre et par serveur, fenêtre glissante, plafond global, messages d'attente. |
+| Journal | token, mot de passe, URL de webhook et e-mail jamais écrits, même dans une trace d'exception. |
+| Surveillance | source déclarée indisponible, retour à la normale, pic d'erreurs, tâche arrêtée, anti-spam des alertes. |
+
 L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` sur Python 3.10,
 3.11 et 3.12 à chaque `push` et chaque pull request.
 
@@ -495,6 +618,10 @@ L'intégration continue (`.github/workflows/ci.yml`) rejoue `ruff` et `pytest` s
 | Des membres écrivent quand même dans `#choisir-ses-roles` | Ce sont des administrateurs (Discord les autorise toujours) ; leurs messages sont effacés si le bot a **Gérer les messages**. |
 | Les commandes n'apparaissent pas | Le bot a besoin du scope `applications.commands` ; sinon attends quelques minutes ou redémarre Discord. |
 | Aucune annonce | Vérifie `/test-jeux`, puis `/reset-jeux` si les jeux ont déjà été envoyés. |
+| « FreeGameDrop n'a pas envoyé l'offre Epic » | Lance `/sante` : la ligne de la source indique si elle a répondu, quand, avec combien d'offres, ou pourquoi elle est en panne. Puis `grep 'event=offer' bot.log` pour voir si l'offre a été détectée, écartée (`offer.rejected`) ou déjà annoncée (`offer.duplicate`). |
+| Une source est en 🔴 dans `/sante` | Elle n'a plus répondu depuis `SOURCE_DOWN_AFTER_MINUTES` : vérifie l'accès réseau du serveur, l'URL dans `.env` (`GAMERPOWER_API_URL`, `EPIC_API_URL`). Les autres sources continuent d'alimenter le bot. |
+| Aucune alerte de surveillance reçue | Vérifie `MONITOR_ENABLED`, `MONITOR_ALERT_CHANNEL_ID` (ou les messages privés du propriétaire), et `grep 'event=monitor.alert' bot.log`. |
+| Des lignes `***` dans les logs | C'est voulu : c'est une valeur sensible (token, clé, webhook, e-mail) masquée avant écriture. |
 | `DISCORD_TOKEN manquant` au démarrage | Le fichier `.env` est absent ou vide : `cp .env.example .env`. |
 
 ---

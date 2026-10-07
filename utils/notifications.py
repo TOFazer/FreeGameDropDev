@@ -11,7 +11,9 @@ import logging
 
 import config
 import database
+from utils import rate_limits
 from utils.embeds import build_game_message
+from utils.logging_setup import log_event
 from utils.offers import offer_matches_preferences, parse_end_datetime
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ async def notify_new_offers(bot, games: list[dict]) -> int:
             if await _send_dm(bot, user_id, game):
                 await database.record_alert_sent(user_id, item_id, "new_offer")
                 sent += 1
+                log_event("alert.sent", event="new_offer", user_id=user_id, offer_id=item_id)
     return sent
 
 
@@ -69,6 +72,7 @@ async def notify_ending_soon(bot, games: list[dict]) -> int:
             if await _send_dm(bot, user_id, game, reminder=True):
                 await database.record_alert_sent(user_id, item_id, "ending_soon")
                 sent += 1
+                log_event("alert.sent", event="ending_soon", user_id=user_id, offer_id=item_id)
     return sent
 
 
@@ -87,10 +91,13 @@ async def _send_dm(bot, user_id: int, game: dict, *, reminder: bool = False) -> 
     else:
         content = "🆕 Une offre correspond à tes préférences !"
     try:
-        await user.send(content=content, embed=embed, view=view)
+        await rate_limits.spaced_send(
+            user.send, key=f"dm:{user_id}", content=content, embed=embed, view=view
+        )
         return True
     except Exception:
         log.info("Impossible d'envoyer une alerte DM à %s (DMs fermés ?)", user_id)
+        log_event("alert.failed", level=logging.INFO, user_id=user_id, offer_id=game.get("id"))
         return False
 
 
@@ -117,11 +124,16 @@ async def send_guild_reminders(bot, games: list[dict], *, now=None) -> int:
                 continue
             embed, view = build_game_message(game)
             try:
-                await channel.send(
-                    content="📅 Dernier jour pour récupérer cette offre !", embed=embed, view=view
+                await rate_limits.spaced_send(
+                    channel.send,
+                    key=f"channel:{channel_id}",
+                    content="📅 Dernier jour pour récupérer cette offre !",
+                    embed=embed,
+                    view=view,
                 )
                 await database.mark_sent(guild_id, item_id)
                 sent += 1
+                log_event("reminder.sent", guild_id=guild_id, offer_id=game.get("id"))
             except Exception:
                 log.warning("Impossible d'envoyer le rappel sur le serveur %s", guild_id)
     return sent

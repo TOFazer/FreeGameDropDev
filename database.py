@@ -705,6 +705,19 @@ async def get_offer_rows_for_stats() -> list[tuple[str, str]]:
             return [(end_date or "", worth or "") for end_date, worth in await cursor.fetchall()]
 
 
+async def ping() -> bool:
+    """Vérifie que la base répond réellement (une requête triviale).
+
+    Utilisé par `utils.monitoring` : un échec ici déclenche l'alerte « la base ne
+    répond plus ». Les exceptions remontent volontairement à l'appelant, qui sait
+    quoi en faire (compter l'erreur, alerter, ne pas interrompre le bot).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT 1") as cursor:
+            row = await cursor.fetchone()
+    return bool(row and row[0] == 1)
+
+
 async def set_bot_state(key: str, value: str) -> None:
     """Mémorise un état interne du bot (ex. date de la dernière vérification)."""
     async with aiosqlite.connect(DB_PATH) as db:

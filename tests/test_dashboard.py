@@ -43,6 +43,25 @@ async def test_api_stats_json(client, db):
     assert data["offers_by_source"] == {"epic": 1}
 
 
+async def test_api_health_pour_la_supervision(client, db):
+    resp = await client.get("/api/health")
+
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] in {"ok", "degraded", "down"}
+    assert data["components"]["database"] == "ok"
+    assert data["components"]["bot"] == "ok"
+    assert data["sources"] == []
+    assert "generated_at" in data
+
+
+async def test_health_repond_la_meme_chose_que_api_health(client, db):
+    resp = await client.get("/health")
+
+    assert resp.status == 200
+    assert (await resp.json())["components"]["database"] == "ok"
+
+
 async def test_login_redirige_vers_discord_avec_un_cookie_detat(client, monkeypatch):
     monkeypatch.setattr(config, "DISCORD_CLIENT_ID", "123")
 
