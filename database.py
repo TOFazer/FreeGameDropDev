@@ -6,7 +6,7 @@ from pathlib import Path
 import aiosqlite
 
 import config
-from utils.offers import classify_offer_type, normalize_genres
+from utils.offers import classify_free_kind, classify_offer_type, normalize_genres
 
 # Surchargeable via DB_PATH dans .env (et remplacé par un fichier temporaire dans les tests).
 DB_PATH = config.DB_PATH
@@ -55,6 +55,21 @@ async def init_db():
                 platform TEXT,
                 role_id INTEGER,
                 PRIMARY KEY (guild_id, platform)
+            )"""
+        )
+        # Salon unique des DLC gratuits (séparé des salons par plateforme).
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS dlc_channels (
+                guild_id INTEGER PRIMARY KEY,
+                channel_id INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+            )"""
+        )
+        # Rôle qui donne accès au salon des DLC et reçoit les mentions.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS dlc_roles (
+                guild_id INTEGER PRIMARY KEY,
+                role_id INTEGER NOT NULL
             )"""
         )
         # salon #choisir-ses-roles de chaque serveur
@@ -182,6 +197,9 @@ async def init_db():
             ("source", "TEXT NOT NULL DEFAULT 'gamerpower'"),
             ("offer_type", "TEXT NOT NULL DEFAULT 'game'"),
             ("genres", "TEXT NOT NULL DEFAULT ''"),
+            # Nature de la gratuité (permanente, temporaire, inconnue), conservée
+            # telle qu'elle a été observée : l'historique ne réinvente rien.
+            ("free_kind", "TEXT NOT NULL DEFAULT ''"),
         ):
             try:
                 await db.execute(f"ALTER TABLE giveaway_items ADD COLUMN {column} {definition}")
@@ -210,6 +228,99 @@ async def get_channel(guild_id: int):
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
+
+
+async def set_dlc_channel(guild_id: int, channel_id: int, active: bool = True):
+    """Enregistre le salon unique des DLC gratuits d'un serveur."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO dlc_channels (guild_id, channel_id, active) VALUES (?, ?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET
+                   channel_id = excluded.channel_id,
+                   active = excluded.active""",
+            (guild_id, channel_id, 1 if active else 0),
+        )
+        await db.commit()
+
+
+async def get_dlc_channel(guild_id: int, *, include_inactive: bool = False):
+    """Salon des DLC d'un serveur, ou None.
+
+    `include_inactive=True` retrouve aussi un salon masqué : il peut ainsi être
+    réparé et réactivé sans créer de doublon.
+    """
+    query = "SELECT channel_id FROM dlc_channels WHERE guild_id = ?"
+    if not include_inactive:
+        query += " AND active = 1"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(query, (guild_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def is_dlc_active(guild_id: int) -> bool:
+    """Le salon des DLC est-il activé sur ce serveur ?"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT active FROM dlc_channels WHERE guild_id = ?", (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row and row[0])
+
+
+async def set_dlc_active(guild_id: int, active: bool) -> bool:
+    """Active ou masque le salon des DLC ; False si aucun salon n'est enregistré."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE dlc_channels SET active = ? WHERE guild_id = ?",
+            (1 if active else 0, guild_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def set_dlc_role(guild_id: int, role_id: int):
+    """Enregistre le rôle d'alerte du salon des DLC."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO dlc_roles (guild_id, role_id) VALUES (?, ?)
+               ON CONFLICT(guild_id) DO UPDATE SET role_id = excluded.role_id""",
+            (guild_id, role_id),
+        )
+        await db.commit()
+
+
+async def get_dlc_role(guild_id: int):
+    """Rôle du salon des DLC d'un serveur, ou None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT role_id FROM dlc_roles WHERE guild_id = ?", (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def get_all_dlc_routes() -> dict:
+    """{serveur: (salon, rôle ou None)} pour tous les salons de DLC actifs."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT c.guild_id, c.channel_id, r.role_id
+               FROM dlc_channels AS c
+               LEFT JOIN dlc_roles AS r ON r.guild_id = c.guild_id
+               WHERE c.active = 1"""
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return {guild_id: (channel_id, role_id) for guild_id, channel_id, role_id in rows}
+
+
+async def get_all_guild_platforms() -> dict:
+    """{serveur: plateformes suivies} ; une absence de ligne = ancienne configuration."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT guild_id, platforms FROM guild_platform_selection") as cursor:
+            return {
+                guild_id: [key for key in (platforms or "").split(",") if key]
+                for guild_id, platforms in await cursor.fetchall()
+            }
 
 
 async def set_platform_channel(guild_id: int, platform: str, channel_id: int):
@@ -413,6 +524,8 @@ async def clear_guild(guild_id: int):
         for table in (
             "platform_channels",
             "platform_roles",
+            "dlc_channels",
+            "dlc_roles",
             "roles_channels",
             "roles_panel_messages",
             "roles_channel_access",
@@ -430,7 +543,7 @@ def _giveaway_field(game: dict, name: str, fallback: str = "", limit: int = 2048
 
 
 async def save_giveaways(games):
-    """Enregistre les champs publics utiles d'une liste d'offres GamerPower."""
+    """Enregistre les champs publics utiles d'une liste d'offres normalisées."""
     rows = []
     for game in games or []:
         if not isinstance(game, dict) or game.get("id") is None:
@@ -441,6 +554,7 @@ async def save_giveaways(games):
 
         genres_text = ",".join(normalize_genres(game.get("genres")))
         offer_type = classify_offer_type(game.get("offer_type") or game.get("type"))
+        free_kind = classify_free_kind(game)
 
         rows.append(
             (
@@ -457,6 +571,7 @@ async def save_giveaways(games):
                 _giveaway_field(game, "source", "gamerpower", limit=32) or "gamerpower",
                 offer_type,
                 genres_text[:500],
+                free_kind,
             )
         )
 
@@ -468,8 +583,8 @@ async def save_giveaways(games):
             """INSERT INTO giveaway_items (
                    item_id, title, description, platforms, worth, end_date,
                    claim_url, source_url, thumbnail, published_date,
-                   source, offer_type, genres
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   source, offer_type, genres, free_kind
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(item_id) DO UPDATE SET
                    title = excluded.title,
                    description = CASE WHEN excluded.description != ''
@@ -492,6 +607,8 @@ async def save_giveaways(games):
                    offer_type = excluded.offer_type,
                    genres = CASE WHEN excluded.genres != ''
                        THEN excluded.genres ELSE giveaway_items.genres END,
+                   free_kind = CASE WHEN excluded.free_kind != ''
+                       THEN excluded.free_kind ELSE giveaway_items.free_kind END,
                    last_seen_at = CURRENT_TIMESTAMP""",
             rows,
         )
@@ -547,7 +664,7 @@ async def get_favorites(user_id: int) -> list[dict]:
         async with db.execute(
             """SELECT g.item_id, g.title, g.description, g.platforms, g.worth,
                       g.end_date, g.claim_url, g.source_url, g.thumbnail,
-                      g.published_date, f.created_at
+                      g.published_date, g.offer_type, g.source, g.free_kind, f.created_at
                FROM user_favorites AS f
                JOIN giveaway_items AS g ON g.item_id = f.item_id
                WHERE f.user_id = ?
@@ -568,7 +685,12 @@ async def get_favorites(user_id: int) -> list[dict]:
             "gamerpower_url": row[7],
             "thumbnail": row[8],
             "published_date": row[9],
-            "favorited_at": row[10],
+            # Le type et la nature de la gratuité suivent le favori : un DLC reste
+            # présenté comme un DLC dans /favoris, comme dans son annonce.
+            "offer_type": row[10] or "game",
+            "source": row[11] or "gamerpower",
+            "free_kind": row[12] or "",
+            "favorited_at": row[13],
         }
         for row in rows
     ]
@@ -598,12 +720,14 @@ def _row_to_giveaway(row) -> dict:
         "offer_type": row[11],
         "genres": [g for g in (row[12] or "").split(",") if g],
         "first_seen_at": row[13],
+        "free_kind": row[14] or "",
     }
 
 
 _GIVEAWAY_COLUMNS = (
     "item_id, title, description, platforms, worth, end_date, claim_url, "
-    "source_url, thumbnail, published_date, source, offer_type, genres, first_seen_at"
+    "source_url, thumbnail, published_date, source, offer_type, genres, first_seen_at, "
+    "free_kind"
 )
 
 
@@ -653,6 +777,25 @@ async def search_giveaways(query: str, limit: int = 20) -> list[dict]:
                 ORDER BY first_seen_at DESC, rowid DESC
                 LIMIT ?""",
             (needle, needle, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [_row_to_giveaway(row) for row in rows]
+
+
+async def get_offers_since(hours: float = 24, limit: int = 50) -> list[dict]:
+    """Offres découvertes par le bot depuis un nombre d'heures donné.
+
+    Sert au récapitulatif : uniquement des offres réellement vues par le bot,
+    de la plus récemment découverte à la plus ancienne.
+    """
+    hours = max(0.0, float(hours))
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"""SELECT {_GIVEAWAY_COLUMNS} FROM giveaway_items
+                WHERE first_seen_at >= datetime('now', ?)
+                ORDER BY first_seen_at DESC, rowid DESC
+                LIMIT ?""",
+            (f"-{hours} hours", limit),
         ) as cursor:
             rows = await cursor.fetchall()
     return [_row_to_giveaway(row) for row in rows]

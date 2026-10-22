@@ -68,6 +68,21 @@ async def test_reponse_normale(api):
     assert FakeSession.appels == [(config.GAMERPOWER_API_URL, {"type": "game", "sort-by": "date"})]
 
 
+async def test_les_dlc_utilisent_la_categorie_loot(api):
+    api(FakeResponse(payload=JEUX))
+
+    assert await gamerpower.fetch_dlc_giveaways() == JEUX
+    assert FakeSession.appels == [(config.GAMERPOWER_API_URL, {"type": "loot", "sort-by": "date"})]
+
+
+async def test_statut_absent_ne_bloque_pas_les_dlc(api):
+    api(FakeResponse(payload=[{"id": 7, "title": "DLC", "status": "active"}]))
+
+    (offre,) = await gamerpower.fetch_dlc_giveaways()
+
+    assert offre["free_verified"] is True
+
+
 async def test_code_derreur_http(api, caplog):
     api(FakeResponse(status=503))
 

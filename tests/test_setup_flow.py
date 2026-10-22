@@ -2,7 +2,7 @@
 
 import discord
 
-from config import CATEGORY_NAME, ROLES_CHANNEL
+from config import CATEGORY_NAME, DLC_CHANNEL, DLC_ROLE_NAME, ROLES_CHANNEL
 
 
 async def test_setup_cree_categorie_salons_roles(cog, guild, db):
@@ -10,9 +10,14 @@ async def test_setup_cree_categorie_salons_roles(cog, guild, db):
 
     category = guild.categories[0]
     assert category.name == CATEGORY_NAME
-    assert [c.name for c in category.channels] == ["jeux-steam", "jeux-epic", ROLES_CHANNEL]
+    assert [c.name for c in category.channels] == [
+        "jeux-steam",
+        "jeux-epic",
+        DLC_CHANNEL,
+        ROLES_CHANNEL,
+    ]
 
-    roles_channel = category.channels[-1]
+    roles_channel = next(c for c in category.channels if c.name == ROLES_CHANNEL)
     assert roles_channel.moved, "le salon des rôles est remonté en haut de la catégorie"
     assert "lecture seule" in roles_channel.topic
     assert roles_channel.overwrites[guild.default_role].view_channel is True
@@ -20,7 +25,11 @@ async def test_setup_cree_categorie_salons_roles(cog, guild, db):
 
     panneau = roles_channel.sent[-1]
     assert panneau["embed"].title.startswith("🎁")
-    assert [b.label for b in panneau["view"].children] == ["Steam", "Epic Games Store"]
+    assert [b.label for b in panneau["view"].children] == [
+        "Steam",
+        "Epic Games Store",
+        "DLC gratuits",
+    ]
 
     assert "lecture seule" in rapport
     assert await db.get_roles_channel(guild.id) == roles_channel.id
@@ -83,18 +92,19 @@ async def test_relance_ne_duplique_rien_et_conserve_lacces(cog, guild, db):
     assert [c.name for c in category.channels] == [
         "jeux-steam",
         "jeux-epic",
+        DLC_CHANNEL,
         ROLES_CHANNEL,
         "jeux-gog",
     ]
     assert len([r for r in guild.roles if r.name == "🔵 Steam"]) == 1
     salon = next(c for c in category.channels if c.name == ROLES_CHANNEL)
     assert salon.overwrites[membre].view_channel is True
-    assert len(salon.sent[-1]["view"].children) == 3
+    assert len(salon.sent[-1]["view"].children) == 4
 
 
 async def test_salon_des_roles_retrouve_apres_renommage(cog, guild, db):
     await cog.apply_setup(guild, ["steam"], [])
-    salon = guild.categories[0].channels[-1]
+    salon = next(c for c in guild.categories[0].channels if c.name == ROLES_CHANNEL)
     salon.name = "roles-renomme"
 
     await cog.apply_setup(guild, ["steam"], [])
@@ -131,10 +141,13 @@ async def test_reset_all_supprime_tout(cog, guild, db):
 
     assert guild.categories == []
     assert all(r.deleted for r in guild.roles if r.name.endswith(("Steam", "Epic Games Store")))
+    assert all(r.deleted for r in guild.roles if r.name == DLC_ROLE_NAME)
     assert "Nettoyage terminé" in rapport
     assert cog.roles_channels == {}
     assert await db.get_roles_channel(guild.id) is None
     assert await db.get_platform_channels(guild.id) == {}
+    assert await db.get_dlc_channel(guild.id, include_inactive=True) is None
+    assert await db.get_dlc_role(guild.id) is None
 
 
 class _FakeResponse:
@@ -151,7 +164,7 @@ async def test_configurations_simultanees_sans_doublons(cog, guild, db):
     )
     assert all(report.startswith("✅") for report in reports)
     assert len(guild.categories) == 1
-    assert len(guild.text_channels) == 3
+    assert len(guild.text_channels) == 4
     channel = guild.get_channel(await db.get_roles_channel(guild.id))
     assert len(channel.sent) == 1
 
@@ -166,7 +179,7 @@ async def test_repare_role_et_salon_supprimes(cog, guild, db):
     assert (await cog.apply_setup(guild, ["steam"], [])).startswith("✅")
     assert (await db.get_platform_channels(guild.id))["steam"] != channel_id
     assert await db.get_platform_role(guild.id, "steam") != role_id
-    assert len(guild.text_channels) == 2
+    assert len(guild.text_channels) == 3
 
 
 async def test_plateforme_decochee_reactivable(cog, guild, db):

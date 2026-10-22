@@ -175,11 +175,37 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
   forêt, pieds d'embeds `/info` et `/stats` alignés sur le pied de marque, marque 🎁
   utilisée de façon cohérente (panneau des rôles, en-tête du dashboard, onboarding).
 
+## Livré — V2.6 : DLC gratuits séparés des jeux
+
+- **Salon `#dlc-gratuits`** : les extensions, packs de contenu et objets cosmétiques gratuits ne
+  sont plus annoncés dans les salons par plateforme. Un rôle dédié (`🧩 DLC gratuits`) est créé,
+  proposé dans le panneau de choix et mentionné à chaque annonce ; le salon reste en lecture
+  seule et invisible sans le rôle.
+- **Activation au choix** : `/setup-auto` et `/config` proposent un bouton « Salon DLC : inclus /
+  masqué ». Un salon masqué est retrouvé par son identifiant puis réactivé sans doublon, et le
+  bouton de rôle refuse l'attribution tant que le salon est masqué.
+- **Source DLC réelle** : `services/gamerpower.py` interroge aussi GamerPower avec `type=loot`,
+  la seule catégorie documentée qui contient les DLC et contenus (il n'existe pas de filtre
+  « dlc » distinct). La nouvelle source `gamerpower_loot` est indépendante : si elle tombe, les
+  jeux complets continuent d'arriver. `MAX_DLC_GAMES` limite le volume par tour.
+- **Epic** : un produit explicitement marqué `DLC`/`add-on` par l'Epic Games Store est classé
+  DLC ; tout le reste reste un jeu complet.
+- **Gratuité permanente ou temporaire** : `utils.offers.classify_free_kind` distingue
+  « ♾️ Gratuit en permanence » (uniquement si la source l'affirme), « ⏳ Offert temporairement »
+  (date de fin réellement fournie) et « ❔ Durée non communiquée ». La valeur est enregistrée
+  avec l'offre : l'historique ne réinvente rien.
+- **Commandes** : `/dlc` parcourt uniquement les DLC et contenus ; `/recap` regroupe en un
+  message les offres découvertes récemment (1 à 168 h, 24 h par défaut).
+- **Tests** : création/réparation du salon et du rôle, masquage/réactivation, routage strict
+  jeux ↔ DLC, respect des plateformes suivies, plafond, classification permanente/temporaire,
+  commandes `/dlc` et `/recap`.
+
 ## Prochains lots
 
 ### V2 — compléments
 
-1. Digest quotidien activable par serveur, puis récapitulatif hebdomadaire.
+1. ~~Digest quotidien~~ Récapitulatif manuel `/recap` livré en V2.6 ; reste à rendre le digest
+   automatique activable par serveur, puis un récapitulatif hebdomadaire.
 2. ~~Offres « Mega Deal » à partir d'un seuil de valeur configuré côté serveur (en plus du seuil personnel déjà disponible via `/preferences`).~~ Livré en V2.1 côté annonce (`MEGA_DEAL_MIN_WORTH_EUR`) ; reste à rendre le seuil configurable par serveur.
 3. Modèles d'annonces configurables, commande de test sans fausse annonce dans les statistiques, et salon de logs facultatif.
 4. File d'envoi et limitation de débit pour respecter les limites Discord à grande échelle.

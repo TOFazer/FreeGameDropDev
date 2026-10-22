@@ -29,7 +29,13 @@ from utils import (
 )
 from utils.embeds import build_game_message, build_roles_embed, source_label
 from utils.logging_setup import log_event
-from utils.offers import filter_offers, normalize_genres, normalize_platforms
+from utils.offers import (
+    classify_free_kind,
+    filter_offers,
+    is_dlc_offer,
+    normalize_genres,
+    normalize_platforms,
+)
 from utils.permissions import (
     admin_note,
     category_overwrites,
@@ -50,14 +56,21 @@ ROLES_CHANNEL_HINT = f"`#{config.ROLES_CHANNEL}`"
 
 
 class RoleButton(discord.ui.Button):
+    """Bouton d'un rôle d'alerte : une plateforme, ou le salon des DLC gratuits."""
+
     def __init__(self, key: str):
+        is_dlc = key == config.DLC_ROUTE
         super().__init__(
-            label=platforms.display_name(key),
-            emoji=platforms.emoji(key),
+            label=config.DLC_ROLE_LABEL if is_dlc else platforms.display_name(key),
+            emoji=config.DLC_EMOJI if is_dlc else platforms.emoji(key),
             style=discord.ButtonStyle.secondary,
             custom_id=f"role:{key}",
         )
         self.key = key
+
+    @property
+    def is_dlc(self) -> bool:
+        return self.key == config.DLC_ROUTE
 
     async def callback(self, interaction: discord.Interaction):
         decision, limit = rate_limits.consume_command_with_limit("roles", interaction)
@@ -66,15 +79,27 @@ class RoleButton(discord.ui.Button):
                 rate_limits.format_limit_message(limit, decision.retry_after), ephemeral=True
             )
             return
-        selected = await database.get_guild_platforms(interaction.guild.id)
-        if selected is not None and self.key not in selected:
-            await interaction.response.send_message(
-                "Cette plateforme n'est plus suivie sur ce serveur. "
-                "Demande à un admin de relancer `/setup-auto`.",
-                ephemeral=True,
-            )
-            return
-        role_id = await database.get_platform_role(interaction.guild.id, self.key)
+        if self.is_dlc:
+            # Le salon des DLC peut être masqué par un admin : le bouton ne doit
+            # alors attribuer aucun rôle, sinon il donnerait accès à un salon caché.
+            if not await database.is_dlc_active(interaction.guild.id):
+                await interaction.response.send_message(
+                    "Le salon des DLC gratuits n'est pas activé sur ce serveur. "
+                    "Demande à un admin de relancer `/setup-auto`.",
+                    ephemeral=True,
+                )
+                return
+            role_id = await database.get_dlc_role(interaction.guild.id)
+        else:
+            selected = await database.get_guild_platforms(interaction.guild.id)
+            if selected is not None and self.key not in selected:
+                await interaction.response.send_message(
+                    "Cette plateforme n'est plus suivie sur ce serveur. "
+                    "Demande à un admin de relancer `/setup-auto`.",
+                    ephemeral=True,
+                )
+                return
+            role_id = await database.get_platform_role(interaction.guild.id, self.key)
         role = interaction.guild.get_role(role_id) if role_id else None
         if role is not None and getattr(role, "permissions", discord.Permissions.none()).value:
             await interaction.response.send_message(
@@ -94,9 +119,10 @@ class RoleButton(discord.ui.Button):
                 msg = f"Rôle **{role.name}** retiré."
             else:
                 await interaction.user.add_roles(role)
+                quoi = "les nouveaux DLC et contenus" if self.is_dlc else "les nouveaux jeux"
                 msg = (
                     f"Rôle **{role.name}** ajouté. Le salon est maintenant visible "
-                    "et tu seras mentionné pour les nouveaux jeux."
+                    f"et tu seras mentionné pour {quoi}."
                 )
         except discord.Forbidden:
             msg = (
@@ -239,13 +265,34 @@ class ConfigView(discord.ui.View):
 
 
 class SetupView(ConfigView):
-    """/setup-auto : plateformes à suivre + accès optionnel au panneau des rôles."""
+    """/setup-auto : plateformes suivies, salon des DLC et accès au panneau des rôles."""
 
-    def __init__(self, cog, platform_keys=(), access_roles=(), *, already_configured=None):
+    def __init__(
+        self, cog, platform_keys=(), access_roles=(), *, already_configured=None, include_dlc=True
+    ):
         super().__init__(cog, access_roles)
         self.platforms = list(platform_keys)
         self.already_configured = bool(platform_keys) if already_configured is None else already_configured
+        self.include_dlc = bool(include_dlc)
         self.add_item(PlatformSelect(self.platforms))
+        self.dlc_button = discord.ui.Button(
+            emoji=config.DLC_EMOJI, style=discord.ButtonStyle.secondary, row=2
+        )
+        self.dlc_button.callback = self.toggle_dlc
+        self._sync_dlc_button()
+        self.add_item(self.dlc_button)
+
+    def _sync_dlc_button(self):
+        self.dlc_button.label = "Salon DLC : inclus" if self.include_dlc else "Salon DLC : masqué"
+        self.dlc_button.style = (
+            discord.ButtonStyle.success if self.include_dlc else discord.ButtonStyle.secondary
+        )
+
+    async def toggle_dlc(self, interaction: discord.Interaction):
+        """Ajoute ou retire le salon des DLC sans toucher aux jeux complets."""
+        self.include_dlc = not self.include_dlc
+        self._sync_dlc_button()
+        await self.refresh(interaction)
 
     def summary(self) -> str:
         chosen = ", ".join(platforms.display_name(k) for k in self.platforms) or "—"
@@ -259,11 +306,18 @@ class SetupView(ConfigView):
                 "**🎁 Bienvenue sur FreeGameDrop !**\n"
                 "Je vais créer automatiquement les salons, rôles et notifications de jeux gratuits.\n"
             )
+        dlc_line = (
+            f"3️⃣ Salon `#{config.DLC_CHANNEL}` : **inclus** "
+            "(extensions et contenus gratuits séparés des jeux complets)\n"
+            if self.include_dlc
+            else f"3️⃣ Salon `#{config.DLC_CHANNEL}` : **masqué**\n"
+        )
         return (
             welcome
             + f"1️⃣ Coche les plateformes à suivre : **{chosen}**\n"
             + f"2️⃣ (Optionnel) Qui voit {ROLES_CHANNEL_HINT} : {describe_access(self.access_roles)}\n"
             + "Laisse l'accès du panneau vide pour le rendre visible à tous.\n"
+            + dlc_line
             + "🔒 Les salons sont en lecture seule pour les membres ; les boutons restent utilisables.\n"
             + "Clique sur **Créer / mettre à jour** pour terminer."
         )
@@ -279,7 +333,12 @@ class SetupView(ConfigView):
             return
         self.busy = True
         await interaction.response.edit_message(content="⏳ Configuration en cours…", view=None)
-        report = await self.cog.apply_setup(interaction.guild, self.platforms, self.access_roles)
+        report = await self.cog.apply_setup(
+            interaction.guild,
+            self.platforms,
+            self.access_roles,
+            include_dlc=self.include_dlc,
+        )
         if report.startswith("✅"):
             try:
                 sent = await self.cog.run_check(target_guild_id=interaction.guild.id)
@@ -531,7 +590,8 @@ class Jeux(commands.Cog):
         self.check_games.start()
 
     async def cog_load(self):
-        self.bot.add_view(RolesView(config.PLATFORM_KEYS))
+        # Les boutons survivent aux redémarrages, y compris celui du salon des DLC.
+        self.bot.add_view(RolesView([*config.PLATFORM_KEYS, config.DLC_ROUTE]))
         self.roles_channels = await database.get_all_roles_channels()
 
     async def cog_unload(self):
@@ -644,6 +704,87 @@ class Jeux(commands.Cog):
         await database.set_platform_channel(guild.id, key, channel.id)
         return channel
 
+    async def ensure_dlc_role(self, guild: discord.Guild) -> discord.Role:
+        """Crée le rôle du salon des DLC, ou remet son nom et sa couleur à jour."""
+        wanted = config.DLC_ROLE_NAME
+        role = None
+        role_id = await database.get_dlc_role(guild.id)
+        if role_id:
+            role = guild.get_role(role_id)
+        if role is None:
+            role = discord.utils.get(guild.roles, name=wanted)
+        if role is None:
+            role = await guild.create_role(
+                name=wanted,
+                colour=discord.Colour(config.DLC_COLOUR),
+                mentionable=True,
+                reason="Rôle d'alerte DLC gratuits",
+            )
+        else:
+            if getattr(role, "permissions", discord.Permissions.none()).value:
+                raise ValueError(
+                    "Le rôle du salon des DLC possède des permissions : "
+                    "renomme-le ou retire ses permissions."
+                )
+            await role.edit(
+                name=wanted,
+                colour=discord.Colour(config.DLC_COLOUR),
+                mentionable=True,
+                reason="Mise à jour du rôle DLC gratuits",
+            )
+        await database.set_dlc_role(guild.id, role.id)
+        return role
+
+    async def ensure_dlc_channel(
+        self,
+        guild: discord.Guild,
+        category: discord.CategoryChannel,
+        role: discord.Role,
+    ) -> discord.TextChannel:
+        """Crée ou répare le salon unique des DLC gratuits.
+
+        Un salon masqué reste retrouvé par son identifiant : le réactiver ne crée
+        donc jamais de doublon.
+        """
+        overwrites = game_channel_overwrites(guild, role)
+        channel_id = await database.get_dlc_channel(guild.id, include_inactive=True)
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            channel = self._find_named_channel(guild, category, config.DLC_CHANNEL)
+        if channel is None:
+            channel = await category.create_text_channel(
+                config.DLC_CHANNEL, topic=config.DLC_TOPIC, overwrites=overwrites
+            )
+        else:
+            updates = {
+                "name": config.DLC_CHANNEL,
+                "topic": config.DLC_TOPIC,
+                "overwrites": overwrites,
+            }
+            if getattr(channel, "category", None) is not category:
+                updates["category"] = category
+            await channel.edit(**updates)
+        await database.set_dlc_channel(guild.id, channel.id, active=True)
+        return channel
+
+    async def set_dlc_enabled(
+        self, guild: discord.Guild, category: discord.CategoryChannel, enabled: bool
+    ) -> tuple[str | None, discord.TextChannel | None]:
+        """Active ou masque le salon des DLC, sans jamais supprimer son contenu."""
+        if enabled:
+            role = await self.ensure_dlc_role(guild)
+            channel = await self.ensure_dlc_channel(guild, category, role)
+            return f"{channel.mention} → {role.mention} (DLC et contenus)", channel
+
+        channel_id = await database.get_dlc_channel(guild.id, include_inactive=True)
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            await database.set_dlc_active(guild.id, False)
+            return None, None
+        await channel.edit(overwrites=inactive_game_channel_overwrites(guild))
+        await database.set_dlc_active(guild.id, False)
+        return f"{channel.mention} (masqué, réactivable via `/setup-auto`)", None
+
     async def ensure_roles_channel(
         self, guild: discord.Guild, category: discord.CategoryChannel, access_roles: list
     ) -> discord.TextChannel:
@@ -721,16 +862,30 @@ class Jeux(commands.Cog):
         )
         await database.set_roles_panel_message(guild_id, message.id)
 
-    async def apply_setup(self, guild: discord.Guild, platform_keys: list, access_roles: list) -> str:
+    async def apply_setup(
+        self,
+        guild: discord.Guild,
+        platform_keys: list,
+        access_roles: list,
+        *,
+        include_dlc: bool = True,
+    ) -> str:
         """Met à jour une configuration sans doublons ; les relances réparent l'état partiel."""
         if not hasattr(self, "_setup_locks"):
             self._setup_locks = {}
         lock = self._setup_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            return await self._apply_setup_locked(guild, platform_keys, access_roles)
+            return await self._apply_setup_locked(
+                guild, platform_keys, access_roles, include_dlc=include_dlc
+            )
 
     async def _apply_setup_locked(
-        self, guild: discord.Guild, platform_keys: list, access_roles: list
+        self,
+        guild: discord.Guild,
+        platform_keys: list,
+        access_roles: list,
+        *,
+        include_dlc: bool = True,
     ) -> str:
         selected = list(dict.fromkeys(key for key in platform_keys if key in config.PLATFORM_KEYS))
         if not selected:
@@ -767,9 +922,13 @@ class Jeux(commands.Cog):
                 created.append(f"{channel.mention} → {role.mention}")
 
             disabled = await self.deactivate_unselected_channels(guild, set(selected))
+            dlc_report, _ = await self.set_dlc_enabled(guild, category, include_dlc)
             roles_channel = await self.ensure_roles_channel(guild, category, access_roles)
             await roles_channel.move(beginning=True, category=category)
-            await self.post_roles_message(roles_channel, selected)
+            panel_keys = list(selected)
+            if include_dlc:
+                panel_keys.append(config.DLC_ROUTE)
+            await self.post_roles_message(roles_channel, panel_keys)
 
         except ValueError as error:
             return f"⚠️ {error} Puis relance `/setup-auto`."
@@ -799,9 +958,16 @@ class Jeux(commands.Cog):
             if disabled
             else ""
         )
+        if include_dlc and "gamerpower_loot" not in config.OFFER_SOURCES:
+            dlc_report += (
+                " — ⚠️ source `gamerpower_loot` absente de `OFFER_SOURCES` : "
+                "seuls les DLC fournis par les autres sources arriveront."
+            )
+        dlc_note = f"\nSalon des DLC gratuits : {dlc_report}" if dlc_report else ""
         return (
             "✅ **Configuration terminée !**\n"
             + "\n".join(created)
+            + dlc_note
             + f"\nPanneau de choix : {roles_channel.mention} "
             + f"(lecture seule, visible par : {describe_access(access_roles)})"
             + disabled_note
@@ -860,6 +1026,12 @@ class Jeux(commands.Cog):
             if channel:
                 await delete_channel(channel)
 
+        # salon des DLC enregistré, y compris s'il a été masqué par un admin
+        dlc_channel_id = await database.get_dlc_channel(guild.id, include_inactive=True)
+        dlc_channel = guild.get_channel(dlc_channel_id) if dlc_channel_id else None
+        if dlc_channel and dlc_channel.id not in deleted:
+            await delete_channel(dlc_channel)
+
         # salon des rôles enregistré
         roles_channel_id = await database.get_roles_channel(guild.id)
         roles_channel = guild.get_channel(roles_channel_id) if roles_channel_id else None
@@ -877,6 +1049,18 @@ class Jeux(commands.Cog):
                     problems.add("**Gérer les rôles**")
                 except discord.HTTPException:
                     pass
+
+        # rôle du salon des DLC
+        dlc_role_id = await database.get_dlc_role(guild.id)
+        dlc_role = guild.get_role(dlc_role_id) if dlc_role_id else None
+        if dlc_role:
+            try:
+                await dlc_role.delete(reason="Nettoyage /reset-all")
+                n_roles += 1
+            except discord.Forbidden:
+                problems.add("**Gérer les rôles**")
+            except discord.HTTPException:
+                pass
 
         # Ne jamais supprimer un salon non enregistré sur la seule base de son nom.
         category = discord.utils.get(guild.categories, name=config.CATEGORY_NAME)
@@ -980,8 +1164,73 @@ class Jeux(commands.Cog):
         async with self._run_check_lock:
             return await self._run_check_once(target_guild_id=target_guild_id)
 
+    async def _announce_offer(
+        self,
+        game: dict,
+        targets: list[tuple],
+        *,
+        mention: str,
+        invite_url: str | None,
+    ) -> tuple[int, bool]:
+        """Envoie une offre à ses salons cibles, une seule fois par salon.
+
+        `targets` contient `(serveur, salon, rôle, clé anti-doublon)`. Retourne
+        `(annonces envoyées, au moins un salon prévenu)`.
+        """
+        embed, view = build_game_message(game, invite_url=invite_url)
+        item_id = str(game.get("id"))
+        sent = 0
+        for guild_id, channel_id, role_id, sent_key in targets:
+            if await database.is_sent(guild_id, sent_key):
+                continue
+            channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                log.warning(
+                    "Salon %s du serveur %s introuvable ; relance /setup-auto pour le réparer",
+                    channel_id,
+                    guild_id,
+                )
+                continue
+            content = f"<@&{role_id}> {mention}" if role_id else None
+            try:
+                await rate_limits.spaced_send(
+                    channel.send,
+                    key=f"channel:{channel_id}",
+                    content=content,
+                    embed=embed,
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions(roles=True),
+                )
+                await database.mark_sent(guild_id, sent_key)
+                sent += 1
+                log_event(
+                    "announce.sent",
+                    offer_id=item_id,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    route=sent_key.rsplit(":", 1)[-1],
+                    offer_type=game.get("offer_type"),
+                )
+            except discord.Forbidden as error:
+                monitoring.HEALTH.record_error()
+                log.warning(
+                    "Discord refuse l'envoi sur le serveur %s (vérifie Voir les salons, "
+                    "Envoyer des messages et Intégrer des liens) : %s",
+                    guild_id,
+                    error,
+                )
+            except discord.HTTPException as error:
+                monitoring.HEALTH.record_error()
+                log.warning("Envoi impossible sur le serveur %s : %s", guild_id, error)
+        return sent, sent > 0
+
     async def _run_check_once(self, *, target_guild_id: int | None = None) -> int:
-        """Envoie les jeux gratuits pas encore annoncés. Retourne le nombre d'annonces."""
+        """Envoie les offres pas encore annoncées. Retourne le nombre d'annonces.
+
+        Séparation stricte : les jeux complets partent dans le salon de leur
+        plateforme, les DLC/contenus dans le salon unique des DLC. Une offre ne
+        peut donc plus atterrir dans les deux.
+        """
         log_event("check.started", sources=len(config.OFFER_SOURCES))
         response = await offer_engine.fetch_offers()
         log_event("check.fetched", offers=len(response))
@@ -989,67 +1238,64 @@ class Jeux(commands.Cog):
         await database.save_giveaways(games)
         await database.set_bot_state("last_check_at", datetime.now(timezone.utc).isoformat())
         routes = await database.get_routes()
+        dlc_routes = await database.get_all_dlc_routes()
+        guild_platforms = await database.get_all_guild_platforms()
         if target_guild_id is not None:
             routes = [route for route in routes if route[0] == target_guild_id]
+            dlc_routes = {
+                guild_id: targets
+                for guild_id, targets in dlc_routes.items()
+                if guild_id == target_guild_id
+            }
         roles = await database.get_all_platform_roles()
-        mentions = discord.AllowedMentions(roles=True)
         invite_url = branding.build_invite_url(self.bot.user.id) if self.bot.user else None
         new_games = []
         sent = 0
-        for game in games[: config.MAX_GAMES]:
+
+        # 1️⃣ Jeux complets → un salon par plateforme.
+        game_offers = [game for game in games if not is_dlc_offer(game)][: config.MAX_GAMES]
+        for game in game_offers:
             item_id = str(game.get("id"))
-            embed, view = build_game_message(game, invite_url=invite_url)
-            announced_anywhere = False
-            for guild_id, route, channel_id, _ in routes:
-                if not platforms.matches(game, [route]):
-                    continue
-                sent_key = f"{item_id}:{route}"
-                if await database.is_sent(guild_id, sent_key):
-                    continue
-                channel = self.bot.get_channel(channel_id)
-                if channel is None:
-                    log.warning(
-                        "Salon %s du serveur %s introuvable ; relance /setup-auto pour le réparer",
-                        channel_id,
-                        guild_id,
-                    )
-                    continue
-                role_id = roles.get((guild_id, route))
-                content = f"<@&{role_id}> nouveau jeu gratuit !" if role_id else None
-                try:
-                    await rate_limits.spaced_send(
-                        channel.send,
-                        key=f"channel:{channel_id}",
-                        content=content,
-                        embed=embed,
-                        view=view,
-                        allowed_mentions=mentions,
-                    )
-                    await database.mark_sent(guild_id, sent_key)
-                    sent += 1
-                    announced_anywhere = True
-                    log_event(
-                        "announce.sent",
-                        offer_id=item_id,
-                        guild_id=guild_id,
-                        channel_id=channel_id,
-                        platform=route,
-                    )
-                except discord.Forbidden as error:
-                    monitoring.HEALTH.record_error()
-                    log.warning(
-                        "Discord refuse l'envoi sur le serveur %s (vérifie Voir les salons, "
-                        "Envoyer des messages et Intégrer des liens) : %s",
-                        guild_id,
-                        error,
-                    )
-                except discord.HTTPException as error:
-                    monitoring.HEALTH.record_error()
-                    log.warning("Envoi impossible sur le serveur %s : %s", guild_id, error)
-            if announced_anywhere:
+            targets = [
+                (guild_id, channel_id, roles.get((guild_id, route)), f"{item_id}:{route}")
+                for guild_id, route, channel_id, _ in routes
+                if platforms.matches(game, [route])
+            ]
+            count, announced = await self._announce_offer(
+                game, targets, mention="nouveau jeu gratuit !", invite_url=invite_url
+            )
+            sent += count
+            if announced:
                 new_games.append(game)
 
-        log_event("check.finished", announcements=sent, new_offers=len(new_games))
+        # 2️⃣ DLC et contenus → salon unique des DLC, dans la limite dédiée.
+        dlc_offers = [game for game in games if is_dlc_offer(game)][: config.MAX_DLC_GAMES]
+        for game in dlc_offers:
+            item_id = str(game.get("id"))
+            targets = []
+            for guild_id, (channel_id, role_id) in dlc_routes.items():
+                selection = guild_platforms.get(guild_id)
+                # Le salon des DLC respecte les plateformes suivies par le serveur ;
+                # une configuration historique sans sélection reçoit tout.
+                if selection is not None and not platforms.matches(game, selection):
+                    continue
+                targets.append(
+                    (guild_id, channel_id, role_id, f"{item_id}:{config.DLC_ROUTE}")
+                )
+            count, announced = await self._announce_offer(
+                game, targets, mention="nouveau DLC gratuit !", invite_url=invite_url
+            )
+            sent += count
+            if announced:
+                new_games.append(game)
+
+        log_event(
+            "check.finished",
+            announcements=sent,
+            new_offers=len(new_games),
+            game_offers=len(game_offers),
+            dlc_offers=len(dlc_offers),
+        )
         if target_guild_id is not None:
             return sent
 
@@ -1097,6 +1343,20 @@ class Jeux(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ----- commandes -----
+
+    async def _browse_offers(self, interaction: discord.Interaction, games: list, empty_message: str):
+        """Affiche une liste d'offres en privé, avec pagination et favoris."""
+        if not games:
+            await interaction.followup.send(empty_message, ephemeral=True)
+            return
+        view = GameBrowserView(
+            games,
+            owner_id=interaction.user.id,
+            favorite_ids=await database.get_favorite_ids(interaction.user.id),
+        )
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view, ephemeral=True, wait=True
+        )
 
     @app_commands.command(name="free", description="Parcourt les offres de jeux gratuits du moment")
     @app_commands.describe(
@@ -1152,21 +1412,99 @@ class Jeux(commands.Cog):
             period=echeance,
             timezone_name=timezone_name,
         )
-        if not games:
+        await self._browse_offers(
+            interaction,
+            games,
+            "Aucun jeu gratuit trouvé pour le moment, ou la source est temporairement indisponible.",
+        )
+
+    @app_commands.command(
+        name="dlc", description="Parcourt les DLC, extensions et contenus gratuits du moment"
+    )
+    @app_commands.describe(echeance="Filtrer par date de fin")
+    @app_commands.choices(
+        echeance=[
+            app_commands.Choice(name="Se termine aujourd'hui", value="ends_today"),
+            app_commands.Choice(name="Se termine bientôt (24h)", value="ending_soon"),
+        ],
+    )
+    @rate_limits.limited("dlc")
+    async def dlc(self, interaction: discord.Interaction, echeance: str | None = None):
+        """Comme `/free`, mais uniquement les DLC et contenus : jamais les jeux complets."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            response = await offer_engine.fetch_offers(use_cache=True)
+        except Exception:
+            log.exception("Impossible de récupérer les offres pour /dlc")
             await interaction.followup.send(
-                "Aucun jeu gratuit trouvé pour le moment, ou la source est temporairement indisponible.",
+                "Impossible de récupérer les DLC pour le moment. Réessaie un peu plus tard.",
                 ephemeral=True,
             )
             return
 
+        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        await database.save_giveaways(games)
+
+        preferences = await database.get_user_preferences(interaction.user.id)
+        timezone_name = preferences.get("timezone") or config.DEFAULT_TIMEZONE
+        dlc_games = filter_offers(
+            [game for game in games if is_dlc_offer(game)],
+            period=echeance,
+            timezone_name=timezone_name,
+        )
+        await self._browse_offers(
+            interaction,
+            dlc_games,
+            "Aucun DLC gratuit trouvé pour le moment, ou la source est temporairement indisponible.",
+        )
+
+    @app_commands.command(
+        name="recap", description="Récapitule les offres découvertes ces dernières heures"
+    )
+    @app_commands.describe(heures="Fenêtre en heures (1 à 168, 24 par défaut)")
+    @rate_limits.limited("recap")
+    async def recap(self, interaction: discord.Interaction, heures: int = 24):
+        """Un seul message pour voir les nouveautés, jeux complets et DLC confondus."""
+        heures = min(max(int(heures), 1), 168)
+        try:
+            games = await database.get_offers_since(hours=heures, limit=50)
+        except Exception:
+            log.exception("Impossible de lire le récapitulatif des offres")
+            await interaction.response.send_message(
+                "Impossible de lire le catalogue pour le moment. Réessaie plus tard.",
+                ephemeral=True,
+            )
+            return
+
+        if not games:
+            await interaction.response.send_message(
+                f"Aucune nouvelle offre découverte depuis {heures} h. "
+                "Le bot vérifie régulièrement : réessaie plus tard.",
+                ephemeral=True,
+            )
+            return
+
+        dlc_count = sum(1 for game in games if is_dlc_offer(game))
+        permanent = sum(1 for game in games if classify_free_kind(game) == "permanent")
+        summary = [
+            f"**{len(games) - dlc_count}** jeu(x) complet(s)",
+            f"**{dlc_count}** DLC/contenu(s)",
+        ]
+        if permanent:
+            summary.append(f"**{permanent}** gratuit(s) en permanence")
         view = GameBrowserView(
             games,
             owner_id=interaction.user.id,
             favorite_ids=await database.get_favorite_ids(interaction.user.id),
         )
-        view.message = await interaction.followup.send(
-            embed=view.current_embed(), view=view, ephemeral=True, wait=True
+        await interaction.response.send_message(
+            content=f"📬 Offres découvertes ces {heures} dernières heures : " + " · ".join(summary),
+            embed=view.current_embed(),
+            view=view,
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
+        view.message = await interaction.original_response()
 
     @app_commands.command(name="favoris", description="Consulte et gère tes jeux favoris")
     @rate_limits.limited("favoris")
@@ -1392,11 +1730,16 @@ class Jeux(commands.Cog):
         roles_channel_id = await database.get_roles_channel(guild.id)
         if not known and not selected and not roles_channel_id:
             selected = ["steam", "epic"]
+        # Aucun salon DLC enregistré : la mise à jour l'ajoute, comme pour un nouveau
+        # serveur. Un salon masqué explicitement reste masqué.
+        known_dlc = await database.get_dlc_channel(guild.id, include_inactive=True)
+        include_dlc = True if known_dlc is None else await database.is_dlc_active(guild.id)
         view = SetupView(
             self,
             [key for key in config.PLATFORM_KEYS if key in selected],
             await self.saved_access_roles(guild),
             already_configured=bool(known or roles_channel_id),
+            include_dlc=include_dlc,
         )
         await interaction.response.send_message(
             view.summary(),

@@ -25,6 +25,7 @@ async def test_les_commandes_sont_enregistrees(bot_discord):
         "alertes",
         "config",
         "dev-stats",
+        "dlc",
         "favoris",
         "free",
         "historique",
@@ -33,6 +34,7 @@ async def test_les_commandes_sont_enregistrees(bot_discord):
         "ping",
         "preferences",
         "rappel-salon",
+        "recap",
         "recherche",
         "reset-all",
         "reset-jeux",
@@ -45,7 +47,9 @@ async def test_les_commandes_sont_enregistrees(bot_discord):
 async def test_les_boutons_des_roles_survivent_au_redemarrage(bot_discord):
     vue = next(iter(bot_discord.persistent_views))
 
-    assert [b.custom_id for b in vue.children] == [f"role:{k}" for k in config.PLATFORM_KEYS]
+    assert [b.custom_id for b in vue.children] == [
+        f"role:{k}" for k in (*config.PLATFORM_KEYS, config.DLC_ROUTE)
+    ]
     assert vue.timeout is None
 
 
@@ -63,7 +67,7 @@ def test_panneau_de_setup_preselectionne_lexistant():
     assert [o.value for o in selection.options if o.default] == ["steam", "gog"]
     assert "lecture seule" in vue.summary()
     assert "tout le monde" in vue.summary()
-    assert [type(c).__name__ for c in vue.children].count("Button") == 2
+    assert [type(c).__name__ for c in vue.children].count("Button") == 3
 
 
 def test_panneau_de_setup_sans_plateforme():

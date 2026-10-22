@@ -1,4 +1,14 @@
-"""Accès à l'API GamerPower (uniquement l'appel réseau, aucune logique Discord)."""
+"""Accès à l'API GamerPower (uniquement l'appel réseau, aucune logique Discord).
+
+Deux catégories sont interrogées séparément :
+
+- `type=game` — les jeux complets (source « gamerpower ») ;
+- `type=loot` — les DLC, extensions et contenus en jeu (source « gamerpower_loot »).
+
+La documentation officielle ne propose que `game`, `loot` et `beta` : il n'existe
+pas de filtre « dlc » à part. C'est donc `loot` qui alimente le salon des DLC, et
+le type réel de chaque entrée (`DLC`, `Loot`, …) est conservé pour la classification.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +21,10 @@ from config import GAMERPOWER_API_URL, GAMERPOWER_TIMEOUT
 
 log = logging.getLogger(__name__)
 
+# Jeux complets.
 PARAMS = {"type": "game", "sort-by": "date"}
+# DLC, extensions et contenus en jeu : même endpoint, autre catégorie.
+DLC_PARAMS = {"type": "loot", "sort-by": "date"}
 
 # Statuts renvoyés par GamerPower pour une offre réellement en cours. Le endpoint des
 # giveaways peut aussi contenir d'anciennes offres : le statut sert de garde-fou
@@ -33,14 +46,18 @@ def mark_free_verified(games: list) -> list:
     return games
 
 
-async def fetch_giveaways() -> list:
-    """Retourne la liste des jeux gratuits, ou [] si l'API a un souci."""
+async def _fetch(params: dict) -> list:
+    """Interroge l'API avec les paramètres donnés, ou [] si l'API a un souci."""
     try:
         timeout = aiohttp.ClientTimeout(total=GAMERPOWER_TIMEOUT)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(GAMERPOWER_API_URL, params=PARAMS) as resp:
+            async with session.get(GAMERPOWER_API_URL, params=params) as resp:
                 if resp.status != 200:
-                    log.warning("GamerPower a répondu avec le code %s", resp.status)
+                    log.warning(
+                        "GamerPower a répondu avec le code %s (type=%s)",
+                        resp.status,
+                        params.get("type"),
+                    )
                     return []
                 data = await resp.json()
                 if not isinstance(data, list):
@@ -53,3 +70,17 @@ async def fetch_giveaways() -> list:
     except ValueError as e:  # réponse qui n'est pas du JSON
         log.warning("Réponse illisible de GamerPower : %s", e)
         return []
+
+
+async def fetch_giveaways() -> list:
+    """Retourne la liste des jeux complets gratuits, ou [] si l'API a un souci."""
+    return await _fetch(PARAMS)
+
+
+async def fetch_dlc_giveaways() -> list:
+    """Retourne les DLC, extensions et contenus en jeu gratuits, ou [] en cas de panne.
+
+    Le type brut de chaque entrée est conservé : `services.offer_engine` le classe
+    en « dlc » ou « contenu », et le salon des DLC reçoit les deux.
+    """
+    return await _fetch(DLC_PARAMS)
