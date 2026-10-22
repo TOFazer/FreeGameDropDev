@@ -150,3 +150,148 @@ async def test_verification_ciblee_ignore_les_autres_serveurs(cog, serveur_confi
     salons = await serveur_configure([STEAM])
     assert await cog.run_check(target_guild_id=99999) == 0
     assert not salons["steam"].sent
+
+
+async def test_les_offres_deja_envoyees_ne_bloquent_plus_epic_ni_la_suite(
+    cog, serveur_configure, monkeypatch
+):
+    """Régression : 25 offres GamerPower + 1 nouveauté Epic avec MAX_GAMES=10.
+
+    Epic doit partir dès le 1er tour (grâce à l'alternance des sources), les tours
+    suivants doivent rattraper le reste (sans famine à 0), puis une nouveauté Epic
+    apparue plus tard doit partir immédiatement même si les 25 anciennes offres
+    GamerPower sont toujours en tête du flux.
+    """
+    from services import epic_games
+
+    monkeypatch.setattr(config, "MAX_GAMES", 10)
+    gp_catalogue = [dict(STEAM, id=f"gp:{i}", title=f"GP {i}") for i in range(1, 26)]
+    epic_actuel = [dict(EPIC, id="epic:semaine1", title="Epic Semaine 1", source="epic")]
+
+    salons = await serveur_configure(gp_catalogue)
+
+    async def faux_epic():
+        return list(epic_actuel)
+
+    monkeypatch.setattr(epic_games, "fetch_giveaways", faux_epic)
+
+    # 1er passage : 10 annonces, dont l'offre Epic dès maintenant
+    assert await cog.run_check() == 10
+    assert len(salons["epic"].sent) == 1
+    assert salons["epic"].sent[0]["embed"].title == "⚪ Epic Semaine 1"
+
+    # 2e passage : les 10 suivantes (et non 0 !)
+    assert await cog.run_check() == 10
+    # 3e passage : les 6 dernières
+    assert await cog.run_check() == 6
+    # 4e passage : tout est à jour
+    assert await cog.run_check() == 0
+
+    # Nouvelle semaine Epic alors que les 25 offres GamerPower sont toujours présentes
+    epic_actuel.append(dict(EPIC, id="epic:semaine2", title="Epic Semaine 2", source="epic"))
+    assert await cog.run_check() == 1
+    assert [m["embed"].title for m in salons["epic"].sent] == [
+        "⚪ Epic Semaine 1",
+        "⚪ Epic Semaine 2",
+    ]
+
+
+async def test_les_plateformes_non_suivies_ne_consomment_pas_le_plafond(
+    cog, serveur_configure, monkeypatch
+):
+    """15 offres itch.io devant 2 offres Epic ne doivent pas gaspiller MAX_GAMES."""
+    monkeypatch.setattr(config, "MAX_GAMES", 2)
+    offres = [dict(AUTRE, id=f"itch:{i}") for i in range(15)] + [
+        dict(EPIC, id="epic:1", title="Epic 1"),
+        dict(EPIC, id="epic:2", title="Epic 2"),
+    ]
+    salons = await serveur_configure(offres)
+
+    assert await cog.run_check() == 2
+    assert len(salons["epic"].sent) == 2
+
+
+async def test_un_serveur_en_rattrapage_ne_bloque_pas_les_autres_serveurs(
+    cog_for, fakes, db, monkeypatch
+):
+    """Le plafond MAX_GAMES est par serveur : un nouveau serveur ne prive pas les anciens."""
+    monkeypatch.setattr(config, "MAX_GAMES", 3)
+
+    serveur_ancien = fakes.Guild(guild_id=7)
+    cat_a = fakes.Category(serveur_ancien, "🎮 Jeux gratuits")
+    serveur_ancien.categories.append(cat_a)
+    steam_a = fakes.Channel("jeux-steam", cat_a, channel_id=101)
+    epic_a = fakes.Channel("jeux-epic", cat_a, channel_id=102)
+    cat_a.channels.extend([steam_a, epic_a])
+    await db.set_platform_channel(7, "steam", 101)
+    await db.set_platform_channel(7, "epic", 102)
+
+    serveur_neuf = fakes.Guild(guild_id=8)
+    cat_b = fakes.Category(serveur_neuf, "🎮 Jeux gratuits")
+    serveur_neuf.categories.append(cat_b)
+    steam_b = fakes.Channel("jeux-steam", cat_b, channel_id=201)
+    epic_b = fakes.Channel("jeux-epic", cat_b, channel_id=202)
+    cat_b.channels.extend([steam_b, epic_b])
+    await db.set_platform_channel(8, "steam", 201)
+    await db.set_platform_channel(8, "epic", 202)
+
+    # Le serveur ancien a déjà reçu les 10 offres Steam, pas le serveur neuf.
+    anciens_jeux = [dict(STEAM, id=f"old:{i}", title=f"Ancien {i}") for i in range(10)]
+    for jeu in anciens_jeux:
+        await db.mark_sent(7, f"{jeu['id']}:steam")
+
+    nouveaute_epic = dict(EPIC, id="epic:nouveau", title="Nouveauté Epic")
+
+    async def faux_appel_api():
+        return [*anciens_jeux, nouveaute_epic]
+
+    monkeypatch.setattr(gamerpower, "fetch_giveaways", faux_appel_api)
+
+    instance = cog_for(serveur_ancien)
+    tous_les_salons = {101: steam_a, 102: epic_a, 201: steam_b, 202: epic_b}
+    instance.bot.get_channel = tous_les_salons.get
+
+    envoyes = await instance.run_check()
+
+    # Serveur neuf : plafonné à 3 rattrapages ; serveur ancien : reçoit immédiatement Epic !
+    assert len(steam_b.sent) == 3
+    assert len(epic_a.sent) == 1
+    assert epic_a.sent[0]["embed"].title == "⚪ Nouveauté Epic"
+    assert envoyes == 4
+
+
+async def test_salon_interdit_ne_consomme_pas_le_plafond_ni_ne_martele_discord(
+    cog, serveur_configure, monkeypatch
+):
+    """Un salon en 403 Forbidden est ignoré pour le reste du tour et laisse passer Epic."""
+    from utils import monitoring
+
+    monkeypatch.setattr(config, "MAX_GAMES", 1)
+    offres = [dict(STEAM, id=f"s:{i}") for i in range(10)] + [dict(EPIC, id="e:1")]
+    salons = await serveur_configure(offres)
+    tentatives_steam = 0
+
+    async def interdit(**kwargs):
+        nonlocal tentatives_steam
+        tentatives_steam += 1
+        raise discord.Forbidden(_ForbiddenResponse(), "missing access")
+
+    salons["steam"].send = interdit
+
+    assert await cog.run_check() == 1
+    assert tentatives_steam == 1
+    assert len(salons["epic"].sent) == 1
+    assert monitoring.HEALTH.error_count(15) == 1
+
+
+class _ForbiddenResponse:
+    status = 403
+    reason = "Forbidden"
+
+
+async def test_identifiant_zero_annonce_une_seule_fois(cog, serveur_configure):
+    salons = await serveur_configure([dict(STEAM, id=0, title="Jeu ID Zéro")])
+
+    assert await cog.run_check() == 1
+    assert await cog.run_check() == 0
+    assert len(salons["steam"].sent) == 1

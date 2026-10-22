@@ -503,6 +503,39 @@ async def is_sent(guild_id: int, item_id: str) -> bool:
             return await cursor.fetchone() is not None
 
 
+async def get_sent_pairs(guild_ids, item_ids) -> set[tuple[int, str]]:
+    """Retourne les couples `(guild_id, item_id)` déjà envoyés parmi les candidats fournis.
+
+    Interroge l'index primaire `(guild_id, item_id)` en une seule connexion (découpée
+    par lots sous la limite de variables SQLite), pour éviter d'ouvrir la base à
+    chaque couple `(serveur, offre)` quel que soit l'âge de l'historique.
+    """
+    guilds = sorted({int(gid) for gid in guild_ids})
+    items = sorted({str(iid) for iid in item_ids if iid})
+    if not guilds or not items:
+        return set()
+
+    max_vars = 900
+    guild_chunk_size = max(1, min(len(guilds), 100))
+    item_chunk_size = max(1, max_vars - guild_chunk_size)
+
+    found: set[tuple[int, str]] = set()
+    async with aiosqlite.connect(DB_PATH) as db:
+        for g_start in range(0, len(guilds), guild_chunk_size):
+            g_chunk = guilds[g_start : g_start + guild_chunk_size]
+            g_placeholders = ",".join("?" for _ in g_chunk)
+            for i_start in range(0, len(items), item_chunk_size):
+                i_chunk = items[i_start : i_start + item_chunk_size]
+                i_placeholders = ",".join("?" for _ in i_chunk)
+                query = (
+                    f"SELECT guild_id, item_id FROM sent_items "
+                    f"WHERE guild_id IN ({g_placeholders}) AND item_id IN ({i_placeholders})"
+                )
+                async with db.execute(query, [*g_chunk, *i_chunk]) as cursor:
+                    found.update((row[0], row[1]) for row in await cursor.fetchall())
+    return found
+
+
 async def mark_sent(guild_id: int, item_id: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -546,7 +579,7 @@ async def save_giveaways(games):
     """Enregistre les champs publics utiles d'une liste d'offres normalisées."""
     rows = []
     for game in games or []:
-        if not isinstance(game, dict) or game.get("id") is None:
+        if not isinstance(game, dict) or game.get("id") is None or isinstance(game.get("id"), bool):
             continue
         item_id = str(game["id"]).strip()[:128]
         if not item_id:

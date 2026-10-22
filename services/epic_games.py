@@ -38,21 +38,35 @@ def _active_promotion(element: dict) -> dict | None:
     return None
 
 
+def _clean_slug(value: object) -> str | None:
+    if not value:
+        return None
+    slug = str(value).split("/")[0].strip()
+    if not slug or slug == "[]":
+        return None
+    return slug
+
+
 def _product_slug(element: dict) -> str | None:
     mappings = element.get("offerMappings")
     if isinstance(mappings, list):
         for mapping in mappings:
-            if isinstance(mapping, dict) and mapping.get("pageSlug"):
-                return str(mapping["pageSlug"])
-    if element.get("productSlug"):
-        return str(element["productSlug"]).split("/")[0]
+            if isinstance(mapping, dict):
+                slug = _clean_slug(mapping.get("pageSlug"))
+                if slug:
+                    return slug
+    slug = _clean_slug(element.get("productSlug"))
+    if slug:
+        return slug
     catalog_ns = element.get("catalogNs")
     if isinstance(catalog_ns, dict):
         mappings = catalog_ns.get("mappings")
         if isinstance(mappings, list):
             for mapping in mappings:
-                if isinstance(mapping, dict) and mapping.get("pageSlug"):
-                    return str(mapping["pageSlug"])
+                if isinstance(mapping, dict):
+                    slug = _clean_slug(mapping.get("pageSlug"))
+                    if slug:
+                        return slug
     return None
 
 
@@ -143,8 +157,13 @@ def _parse_element(element: dict) -> dict | None:
     }
 
 
-async def fetch_giveaways() -> list:
-    """Retourne les jeux actuellement offerts gratuitement sur l'Epic Games Store."""
+async def fetch_giveaways(*, raise_on_error: bool = False) -> list:
+    """Retourne les jeux actuellement offerts gratuitement sur l'Epic Games Store.
+
+    Quand `raise_on_error=True` (utilisé par `services.offer_engine`), les erreurs
+    HTTP, réseau ou de structure remontent à l'agrégateur pour que `/sante` et le
+    monitoring signalent fidèlement une source bloquée ou en panne.
+    """
     params = {
         "locale": EPIC_LOCALE,
         "country": EPIC_COUNTRY,
@@ -156,22 +175,32 @@ async def fetch_giveaways() -> list:
             async with session.get(EPIC_API_URL, params=params) as resp:
                 if resp.status != 200:
                     log.warning("Epic Games Store a répondu avec le code %s", resp.status)
+                    if raise_on_error:
+                        raise RuntimeError(f"HTTP {resp.status}")
                     return []
                 data = await resp.json(content_type=None)
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         log.warning("Impossible de joindre Epic Games Store : %s", e)
+        if raise_on_error:
+            raise
         return []
     except ValueError as e:  # réponse qui n'est pas du JSON
         log.warning("Réponse illisible d'Epic Games Store : %s", e)
+        if raise_on_error:
+            raise
         return []
 
     try:
         elements = data["data"]["Catalog"]["searchStore"]["elements"]
-    except (KeyError, TypeError):
+    except (KeyError, TypeError) as e:
         log.warning("Format de réponse inattendu d'Epic Games Store")
+        if raise_on_error:
+            raise ValueError("format de réponse inattendu d'Epic Games Store") from e
         return []
     if not isinstance(elements, list):
         log.warning("Format de réponse inattendu d'Epic Games Store : la liste des jeux est absente")
+        if raise_on_error:
+            raise ValueError("liste des jeux absente dans la réponse d'Epic Games Store")
         return []
 
     games = []
