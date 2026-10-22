@@ -251,12 +251,12 @@ class SetupView(ConfigView):
         chosen = ", ".join(platforms.display_name(k) for k in self.platforms) or "—"
         if self.already_configured:
             welcome = (
-                "**🎮 Serveur déjà configuré : je mets à jour les réglages sans créer de doublons.**\n"
+                "**🎁 Serveur déjà configuré : je mets à jour les réglages sans créer de doublons.**\n"
                 "Les salons ou rôles supprimés seront réparés au prochain clic.\n"
             )
         else:
             welcome = (
-                "**🎮 Bienvenue sur FreeGameDrop !**\n"
+                "**🎁 Bienvenue sur FreeGameDrop !**\n"
                 "Je vais créer automatiquement les salons, rôles et notifications de jeux gratuits.\n"
             )
         return (
@@ -917,7 +917,7 @@ class Jeux(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
         message = (
-            "🎮 **Bienvenue sur FreeGameDrop !**\n"
+            "🎁 **Bienvenue sur FreeGameDrop !**\n"
             "Un administrateur peut lancer `/setup-auto`, choisir ses plateformes et cliquer sur "
             "**Créer / mettre à jour**. Je crée les salons et les rôles, puis vérifie les offres.\n"
             "Les membres choisissent ensuite leurs alertes dans le panneau de rôles."

@@ -277,7 +277,7 @@ body {{ font-family: {design.FONT_FAMILY}; font-size: 15px; line-height: {design
 h1 {{ font-size: 28px; font-weight: 800; }}
 h2 {{ font-size: 22px; font-weight: 700; }}
 h3 {{ font-size: 17px; font-weight: 600; }}
-a {{ color: var(--fgd-primary-hover); }}
+a {{ color: var(--fgd-secondary); }}
 header {{ padding: 16px 24px; background: var(--fgd-surface); border-bottom: 1px solid var(--fgd-border);
           display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }}
 header h1 {{ margin: 0; font-size: 22px; font-weight: 700; }}
@@ -294,13 +294,15 @@ footer {{ text-align: center; padding: 24px; font-size: 12px; color: var(--fgd-t
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }}
 .grid-offers {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }}
 a.button, button.button {{ display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            background: var(--fgd-primary); color: #ffffff; height: {design.BUTTON_HEIGHT};
+            background: var(--fgd-action); color: var(--fgd-ivory); height: {design.BUTTON_HEIGHT};
             padding: 0 {design.BUTTON_PADDING_X}; border-radius: {design.BUTTON_RADIUS};
             text-decoration: none; font-weight: 600; font-size: 14px; border: none; cursor: pointer; }}
-a.button:hover, button.button:hover {{ background: var(--fgd-primary-hover); }}
-a.button:active, button.button:active {{ background: var(--fgd-primary-active); }}
-a.button.secondary, button.button.secondary {{ background: #232a3d; color: var(--fgd-text); }}
-a.button.secondary:hover, button.button.secondary:hover {{ background: #2a3149; }}
+a.button:hover, button.button:hover {{ background: var(--fgd-action-hover); }}
+a.button:active, button.button:active {{ background: var(--fgd-action-active); }}
+a.button.secondary, button.button.secondary {{ background: {design.BUTTONS['secondary']['bg']};
+            color: var(--fgd-text); }}
+a.button.secondary:hover, button.button.secondary:hover
+            {{ background: {design.BUTTONS['secondary']['bg_hover']}; }}
 a.button.danger, button.button.danger {{ background: var(--fgd-danger); }}
 a.button.danger:hover, button.button.danger:hover {{ background: var(--fgd-danger-hover); }}
 button.button:disabled, a.button.disabled {{ background: var(--fgd-surface);
@@ -319,8 +321,9 @@ label.check {{ display: block; padding: 6px 0; }}
           color: var(--fgd-text); border-radius: 999px; padding: 2px 10px; font-size: 12px;
           font-weight: 600; margin-right: 6px; text-decoration: none; }}
 a.badge:hover {{ border-color: var(--fgd-primary); }}
-a.badge.active {{ background: var(--fgd-primary-soft); border-color: var(--fgd-primary); color: #ffffff; }}
-.badge.free {{ background: var(--fgd-primary); border-color: var(--fgd-primary); color: #ffffff; }}
+a.badge.active {{ background: var(--fgd-primary-soft); border-color: var(--fgd-primary);
+          color: var(--fgd-ivory); }}
+.badge.free {{ background: var(--fgd-action); border-color: var(--fgd-action); color: var(--fgd-ivory); }}
 .badge.new {{ color: var(--fgd-secondary); border-color: var(--fgd-secondary); }}
 .badge.ending {{ color: var(--fgd-urgent); border-color: var(--fgd-urgent); }}
 .badge.ended {{ color: var(--fgd-ended); border-color: var(--fgd-ended); }}
@@ -338,15 +341,17 @@ a.badge.active {{ background: var(--fgd-primary-soft); border-color: var(--fgd-p
 .guild-row img {{ width: 40px; height: 40px; border-radius: 50%; }}
 .guild-row .spacer {{ margin-left: auto; }}
 .filters a {{ margin-right: 8px; }}
-.notice {{ background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.35);
+.notice {{ background: color-mix(in srgb, var(--fgd-success) 8%, transparent);
+           border: 1px solid color-mix(in srgb, var(--fgd-success) 35%, transparent);
            border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }}
-.notice.env-banner {{ background: rgba(250, 204, 21, 0.08); border-color: rgba(250, 204, 21, 0.35); }}
+.notice.env-banner {{ background: color-mix(in srgb, var(--fgd-warning) 8%, transparent);
+           border-color: color-mix(in srgb, var(--fgd-warning) 35%, transparent); }}
 .env-tag {{ margin-left: 8px; }}
 </style>
 </head>
 <body>
 <header>
-<h1><a href="/">🎮 {html.escape(site_name)}</a></h1>{badge}
+<h1><a href="/">🎁 {html.escape(site_name)}</a></h1>{badge}
 {_nav(user, active)}
 </header>
 <main>

@@ -7,7 +7,12 @@ Le but n'est pas de choisir de jolies couleurs : quand quelqu'un voit un embed, 
 dashboard ou le site, il doit penser immédiatement « Ça, c'est FreeGameDrop ».
 Orvex reste en retrait ; FreeGameDrop porte l'identité.
 
-**FreeGameDrop en trois mots : Gaming — Moderne — Premium.**
+FreeGameDrop partage le même univers visuel que **OverX** et **OverLoad** : un style
+**vert forêt, naturel, moderne et premium** — pas de dégradés flashy, de néons ni
+d'effets gaming excessifs. Le logo FreeGameDrop (🎁) ne change pas : c'est tout ce
+qui l'entoure qui évolue.
+
+**FreeGameDrop en trois mots : Naturel — Moderne — Premium.**
 
 Ces trois mots guident toutes les décisions graphiques. La source unique des valeurs
 chiffrées est [`utils/design.py`](utils/design.py) (design tokens) ; ce document en est
@@ -17,46 +22,65 @@ la version lisible.
 
 ## 1. Couleurs
 
+La palette « forêt » compte cinq couleurs de base, communes aux trois produits :
+
+| Couleur | Valeur | Rôle |
+|---|---|---|
+| Vert forêt | `#173D2B` | couleur principale |
+| Vert feuille | `#285B40` | boutons et actions |
+| Vert sauge | `#91A889` | accents secondaires |
+| Ivoire | `#F3F1E8` | fonds clairs |
+| Graphite | `#242923` | texte et fonds sombres |
+
 ### 1.1 Couleur principale
 
 | Rôle | Valeur |
 |---|---|
-| **Primary** | `#7C3AED` (violet) |
+| **Primary** | `#173D2B` (vert forêt) |
 
 C'est la couleur que les gens associent à FreeGameDrop en une demi-seconde. Elle sert pour :
 
-- boutons principaux ;
-- liens ;
-- éléments importants et accents du dashboard ;
 - filet (barre latérale) des embeds ;
-- badges « GRATUIT » ;
+- éléments importants et accents de marque du dashboard ;
 - rôles et salons créés par le bot quand la plateforme est inconnue.
 
-Variantes : hover `#8B5CF6`, active `#6D28D9`, fond discret (badges actifs) `#2A2140`.
+Variantes : hover `#1F4A32`, active `#102A1E`, fond discret (badges actifs) `#1E352A`.
 
-### 1.2 Couleur secondaire
+### 1.2 Couleur d'action
 
 | Rôle | Valeur |
 |---|---|
-| **Secondary** | `#22D3EE` (cyan) |
+| **Action** | `#285B40` (vert feuille) |
+
+Le vert feuille porte les appels à l'action : boutons principaux (« 🎁 Récupérer le
+jeu ») et badge « GRATUIT ». Variantes : hover `#336C4E`, active `#1F4A32`.
+
+### 1.3 Couleur secondaire
+
+| Rôle | Valeur |
+|---|---|
+| **Secondary** | `#91A889` (vert sauge) |
 
 Elle complète la principale sans lui voler la vedette : statistiques, catégories,
-illustrations, hover, petits détails, badge « NOUVEAU ».
+illustrations, hover, petits détails, badge « NOUVEAU », liens sur fond sombre.
 
-### 1.3 Couleurs neutres (thème sombre)
+### 1.4 Couleurs neutres (thème sombre graphite)
 
 Jamais de `#000000` pur : un dashboard entièrement noir paraît amateur.
 
 | Token | Valeur | Usage |
 |---|---|---|
-| Background | `#0B0E14` | fond de page (le plus sombre) |
-| Surface | `#121622` | header, barres |
-| Card | `#1A1F2E` | cartes (légèrement plus clair) |
-| Text | `#F2F4F8` | blanc cassé |
-| Secondary text | `#9AA3B5` | gris |
-| Border | `#272E42` | séparateurs |
+| Background | `#1A1E1A` | fond de page (graphite assombri, le plus sombre) |
+| Surface | `#242923` | graphite — header, barres |
+| Card | `#2C322C` | cartes (légèrement plus clair) |
+| Text | `#F3F1E8` | ivoire |
+| Secondary text | `#A3AEA0` | sauge grisé |
+| Border | `#3A423A` | séparateurs |
 
-### 1.4 Couleurs des plateformes
+Le thème clair correspondant (interfaces lumineuses, type site OverX) inverse la
+paire : fond ivoire `#F3F1E8`, texte graphite `#242923`.
+
+### 1.5 Couleurs des plateformes
 
 FreeGameDrop garde **sa** couleur. Les plateformes gardent une couleur reconnaissable,
 utilisée uniquement dans de petits badges, icônes, labels et filtres — **jamais** en
@@ -64,22 +88,22 @@ embed entièrement coloré.
 
 | Plateforme | Valeur | Exemple d'usage |
 |---|---|---|
-| FreeGameDrop | `#7C3AED` | marque (filet d'embed, boutons, badges GRATUIT) |
+| FreeGameDrop | `#173D2B` | marque (filet d'embed) ; actions et badge GRATUIT en vert feuille `#285B40` |
 | Steam | `#66C0F4` | badge, rôle, filtre |
 | Epic Games | `#D9D9D9` | badge, rôle, filtre (marque noir/blanc) |
-| GOG | `#86328B` | badge, rôle, filtre (violet propre à GOG, distinct du violet marque) |
+| GOG | `#86328B` | badge, rôle, filtre (violet propre à GOG) |
 | Ubisoft | `#0070FF` | badge, rôle, filtre |
 
-### 1.5 Sémantique et urgence
+### 1.6 Sémantique et urgence
 
 | Niveau | Couleur | Emoji | Quand |
 |---|---|---|---|
-| Normal | `#4ADE80` | 🟢 | plus de 24 h restantes |
-| Attention | `#FACC15` | 🟡 | moins de 24 h |
-| Urgent | `#FB923C` | 🟠 | moins de 6 h |
-| Se termine | `#F87171` | 🔴 | moins d'1 h |
-| Terminée | `#6B7280` | ⚫ | offre expirée |
-| Bouton danger | `#E5484D` | — | supprimer, désactiver, réinitialiser |
+| Normal | `#7FAE6E` | 🟢 | plus de 24 h restantes |
+| Attention | `#E0C169` | 🟡 | moins de 24 h |
+| Urgent | `#DE8B4D` | 🟠 | moins de 6 h |
+| Se termine | `#D96A5B` | 🔴 | moins d'1 h |
+| Terminée | `#7A827B` | ⚫ | offre expirée |
+| Bouton danger | `#C14B42` | — | supprimer, désactiver, réinitialiser |
 
 ---
 
@@ -107,16 +131,16 @@ Un seul langage visuel partout. Rayon **10 px**, hauteur **40 px**, padding hori
 
 | Bouton | Fond | Texte | Hover | Usage |
 |---|---|---|---|---|
-| **Principal** | `#7C3AED` | blanc | `#8B5CF6` | une seule action principale par surface (ex. « 🎁 Récupérer le jeu ») |
-| **Secondaire** | `#232A3D` | `#F2F4F8` | `#2A3149` | action complémentaire (ex. « ➕ Ajouter FreeGameDrop ») |
-| **Danger** | `#E5484D` | blanc | `#C73E43` | supprimer, désactiver, réinitialiser |
-| **Désactivé** | `#121622` | `#9AA3B5` | — | `cursor: not-allowed` |
+| **Principal** | `#285B40` (vert feuille) | ivoire `#F3F1E8` | `#336C4E` | une seule action principale par surface (ex. « 🎁 Récupérer le jeu ») |
+| **Secondaire** | `#2C322C` | `#F3F1E8` | `#343B34` | action complémentaire (ex. « ➕ Ajouter FreeGameDrop ») |
+| **Danger** | `#C14B42` | ivoire | `#A93E36` | supprimer, désactiver, réinitialiser |
+| **Désactivé** | `#242923` | `#A3AEA0` | — | `cursor: not-allowed` |
 
 Sur Discord, les boutons-liens (URL) ne sont pas colorables : discord.py leur applique
 toujours le style « link ». La hiérarchie « principal / secondaire » passe alors par
 l'ordre, le libellé et l'emoji : « 🎁 Récupérer le jeu » en premier, « ➕ Ajouter
 FreeGameDrop » en retrait — jamais l'inverse. L'identité de la marque est portée par le
-filet violet de l'embed, pas par les boutons.
+filet vert forêt de l'embed, pas par les boutons.
 
 ---
 
@@ -128,7 +152,7 @@ contrôle pas l'original, on contrôle **la manière de l'afficher**.
 - **Ratio** : 16/9 partout (vignettes du dashboard : `aspect-ratio: 16/9`).
 - **Recadrage** : `object-fit: cover` — jamais de déformation.
 - **Coins** : arrondis 12 px.
-- **Fond** : `surface` (`#121622`) pendant le chargement.
+- **Fond** : `surface` (`#242923`) pendant le chargement.
 - **Embeds** : image pleine largeur (`set_image`), même emplacement pour toutes les
   offres — jamais une image énorme, jamais une minuscule.
 
@@ -141,11 +165,11 @@ pas de sapin de Noël.
 
 | Badge | Couleur | Fonction |
 |---|---|---|
-| `GRATUIT` | primaire `#7C3AED` | le plus important : l'offre est gratuite |
+| `GRATUIT` | action `#285B40` | le plus important : l'offre est gratuite |
 | `🔵 Steam` / `⚪ Epic Games Store` / `🟣 GOG` / `🔷 Ubisoft` | couleur de la plateforme | savoir immédiatement où récupérer le jeu |
-| `NOUVEAU` | secondaire `#22D3EE` | nouvelle offre |
-| `SE TERMINE BIENTÔT` | urgence `#FB923C` | attirer l'attention (< 6 h) |
-| `EXPIRÉ` | neutre `#6B7280` | historique |
+| `NOUVEAU` | secondaire `#91A889` | nouvelle offre |
+| `SE TERMINE BIENTÔT` | urgence `#DE8B4D` | attirer l'attention (< 6 h) |
+| `EXPIRÉ` | neutre `#7A827B` | historique |
 
 ---
 
@@ -158,11 +182,13 @@ testée sur mobile.
 
 1. **Quoi** — badge d'auteur : `🎁 JEU GRATUIT`
 2. **Quel jeu** — titre : le nom du jeu, rien d'autre
-3. **Pourquoi** — `💰 Prix` : `~~59,99 €~~ ➜ **GRATUIT**`
-4. **Où** — `🎮 Plateforme` : badge `🎮 Epic Games Store`
-5. **Jusqu'à quand** — `⏰ Fin de l'offre` : `🟡 <t:…:R>` + date complète
+3. **Pourquoi** — `Prix` : `~~59,99 €~~ ➜ **GRATUIT**`
+4. **Où** — `Plateforme` : badge `⚪ Epic Games Store`
+5. **Jusqu'à quand** — `Fin de l'offre` : `🟡 <t:…:R>` + date complète
 6. **Action** — `[🎁 Récupérer le jeu]` (principal) + `[➕ Ajouter FreeGameDrop]` (secondaire)
 
+Prix, plateforme et expiration sont regroupés sur une même ligne de champs, avec
+des libellés sobres sans emoji décoratif : le signal est porté par les valeurs.
 L'image du jeu est la partie visuelle forte (pleine largeur, en bas de l'embed).
 La description, si elle existe, reste courte et secondaire. Le branding
 (`🎁 FreeGameDrop · par Orvex · Source : …`) tient dans le pied de page — discret,
@@ -175,13 +201,13 @@ Le bouton envoie **directement** vers la page officielle de récupération du je
 Même squelette partout ; seul le badge plateforme change.
 
 ```
-┌─ filet violet #7C3AED ─────────────────────────────┐
+┌─ filet vert forêt #173D2B ─────────────────────────┐
 │ 🎁 JEU GRATUIT                          (auteur)   │
 │                                                    │
 │ 🔵 Super Jeu                            (titre)    │
 │ Un très bon jeu.                        (description, courte)
 │                                                    │
-│ 💰 Prix      🎮 Plateforme   ⏰ Fin de l'offre     │
+│ Prix         Plateforme      Fin de l'offre        │
 │ ~~19.99~~ ➜   🔵 Steam       🟢 Dans 3 jours       │
 │   **GRATUIT**                  08/10 à 23:59       │
 │                                                    │
@@ -200,13 +226,14 @@ Même squelette partout ; seul le badge plateforme change.
 
 | Variante | Badge d'auteur | Filet | Usage |
 |---|---|---|---|
-| Nouvelle offre | `🎁 JEU GRATUIT` | violet | annonce standard |
-| Offre bientôt terminée | `🔥 SE TERMINE BIENTÔT` | violet | < 6 h restantes (détection auto) |
-| Offre prolongée | `🔄 OFFRE PROLONGÉE` | violet | prolongation (passée explicitement) |
-| Offre terminée | `❌ OFFRE TERMINÉE` | gris `#6B7280` | historique |
+| Nouvelle offre | `🎁 JEU GRATUIT` | vert forêt | annonce standard |
+| Offre bientôt terminée | `⏳ SE TERMINE BIENTÔT` | vert forêt | < 6 h restantes (détection auto) |
+| Offre prolongée | `🔄 OFFRE PROLONGÉE` | vert forêt | prolongation (passée explicitement) |
+| Offre terminée | `❌ OFFRE TERMINÉE` | gris `#7A827B` | historique |
 
-Une offre « exceptionnelle » (jeu complet de grande valeur) garde le bandeau
-`🔥 OFFRE EXCEPTIONNELLE` avec le détail chiffré.
+Une offre « exceptionnelle » (jeu complet de grande valeur) reçoit une mise en
+évidence spéciale mais sobre : le bandeau `⭐ OFFRE EXCEPTIONNELLE` avec le
+détail chiffré.
 
 ---
 
@@ -225,13 +252,14 @@ Une offre « exceptionnelle » (jeu complet de grande valeur) garde le bandeau
 
 - [x] Couleur principale définie et utilisée partout (boutons, liens, embeds, dashboard)
 - [x] Couleur secondaire définie (stats, catégories, détails)
-- [x] Neutres définis (thème sombre, pas de noir pur)
+- [x] Neutres définis (thème sombre graphite, pas de noir pur)
 - [x] Couleurs plateformes séparées de la marque (badges uniquement)
 - [x] Police unique (Inter) + échelle H1/H2/H3/Body/Small/Button/Caption
 - [x] Style des boutons (primaire/secondaire/danger/désactivé : rayon, hauteur, hover)
 - [x] Style des images (16:9, coins 12 px, cover, fond surface)
 - [x] Système de badges (GRATUIT, plateforme, NOUVEAU, SE TERMINE BIENTÔT, EXPIRÉ)
-- [x] Trois mots de marque (Gaming — Moderne — Premium)
+- [x] Trois mots de marque (Naturel — Moderne — Premium)
+- [x] Palette « forêt » partagée avec OverX et OverLoad (même univers visuel)
 - [x] Hiérarchie d'embed : quoi → jeu → prix → plateforme → échéance → action
 - [x] Image cohérente, titre clair (nom du jeu), prix évident
 - [x] Plateforme et expiration visibles avec niveaux d'urgence 🟢🟡🟠🔴

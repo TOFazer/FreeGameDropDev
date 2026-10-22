@@ -59,7 +59,7 @@ def build_info_embed(bot: commands.Bot) -> discord.Embed:
     if development:
         embed.set_footer(text="🧪 FreeGameDrop DEV • instance de test, données séparées de la production")
     else:
-        embed.set_footer(text="FreeGameDrop • Merci de faire partie de la communauté !")
+        embed.set_footer(text=f"{design.FOOTER} · Merci de faire partie de la communauté !")
     return embed
 
 
@@ -71,27 +71,28 @@ def build_stats_embed(bot: commands.Bot, stats: dict) -> discord.Embed:
     embed = discord.Embed(
         title="📊 FreeGameDrop en chiffres",
         description="Tout ce qui suit provient des vérifications réellement effectuées par le bot.",
-        colour=discord.Colour.blurple(),
+        colour=discord.Colour(design.embed_colour("new")),
     )
     if bot.user is not None:
         embed.url = branding.build_invite_url(bot.user.id)
-    embed.add_field(name="🎮 Offres détectées", value=f"{stats.get('total_offers', 0):,}", inline=True)
-    embed.add_field(name="🟢 Offres actives", value=f"{stats.get('active_offers', 0):,}", inline=True)
+    # Libellés sobres, comme les annonces : pas d'emoji décoratif par champ.
+    embed.add_field(name="Offres détectées", value=f"{stats.get('total_offers', 0):,}", inline=True)
+    embed.add_field(name="Offres actives", value=f"{stats.get('active_offers', 0):,}", inline=True)
     embed.add_field(
-        name="🆕 Ce mois-ci", value=f"{stats.get('offers_last_30_days', 0):,}", inline=True
+        name="Ce mois-ci", value=f"{stats.get('offers_last_30_days', 0):,}", inline=True
     )
     embed.add_field(
-        name="💰 Valeur connue",
+        name="Valeur connue",
         value=f"{stats.get('known_value_eur', 0):,.2f} €\n*(offres libellées en euros)*",
         inline=True,
     )
     embed.add_field(
-        name="🏪 Plateformes suivies", value=f"{stats.get('platforms_watched', 0):,}", inline=True
+        name="Plateformes suivies", value=f"{stats.get('platforms_watched', 0):,}", inline=True
     )
-    embed.add_field(name="🛰️ Sources", value=sources, inline=True)
-    embed.add_field(name="🏠 Serveurs", value=f"{stats.get('guilds', 0):,}", inline=True)
-    embed.add_field(name="⏱️ Dernière vérification", value=last_check, inline=True)
-    embed.set_footer(text="FreeGameDrop • Ajoute le bot à ton serveur depuis le titre !")
+    embed.add_field(name="Sources", value=sources, inline=True)
+    embed.add_field(name="Serveurs", value=f"{stats.get('guilds', 0):,}", inline=True)
+    embed.add_field(name="Dernière vérification", value=last_check, inline=True)
+    embed.set_footer(text=f"{design.FOOTER} · Ajoute le bot à ton serveur depuis le titre !")
     return embed
 
 
