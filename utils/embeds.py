@@ -2,17 +2,21 @@
 
 L'embed n'est pas une notification technique : c'est une mini publicité pour
 FreeGameDrop, construite selon l'identité visuelle de `utils/design.py`
-(documentée dans `DESIGN.md`). Hiérarchie de lecture (2–3 secondes) :
+(documentée dans `DESIGN.md`). Rendu propre et peu chargé — hiérarchie de
+lecture (2–3 secondes) :
 
-1️⃣ Quoi    → badge d'auteur : 🎁 JEU GRATUIT / 🔥 SE TERMINE BIENTÔT / …
-2️⃣ Quel jeu → titre : le nom du jeu, rien d'autre
-3️⃣ Pourquoi → 💰 Prix : ~~59,99 €~~ ➜ **GRATUIT**
-4️⃣ Où      → 🎮 Plateforme : petit badge (emoji + nom)
-5️⃣ Quand   → ⏰ Fin de l'offre : emoji d'urgence + horodatage relatif
+1️⃣ Quoi    → badge d'auteur : 🎁 JEU GRATUIT / ⏳ SE TERMINE BIENTÔT / …
+2️⃣ Quel jeu → titre : le nom du jeu, très visible, rien d'autre
+3️⃣ Pourquoi → Prix : ~~59,99 €~~ ➜ **GRATUIT**
+4️⃣ Où      → Plateforme : petit badge (emoji + nom)
+5️⃣ Quand   → Fin de l'offre : emoji d'urgence + horodatage relatif
 6️⃣ Action  → [🎁 Récupérer le jeu] (principal) + [➕ Ajouter FreeGameDrop] (secondaire)
 
-La marque reste FreeGameDrop partout : le filet de l'embed est toujours la couleur
-principale (gris neutre pour une offre terminée) — jamais la couleur d'une plateforme.
+Prix, plateforme et expiration sont regroupés sur la même ligne de champs,
+avec des libellés sans emoji décoratif : le signal est porté par les valeurs
+(prix barré, badge plateforme, 🟢🟡🟠🔴). La marque reste FreeGameDrop
+partout : le filet de l'embed est toujours le vert forêt principal (gris
+neutre pour une offre terminée) — jamais la couleur d'une plateforme.
 """
 
 from __future__ import annotations
@@ -65,7 +69,7 @@ def urgency_for(end_date: str | None, now: datetime | None = None) -> str:
 
 
 def format_time_remaining(end_date: str | None, now: datetime | None = None) -> str:
-    """⏰ emoji d'urgence + horodatage relatif Discord + date complète."""
+    """Emoji d'urgence + horodatage relatif Discord + date complète."""
     level = urgency_for(end_date, now=now)
     if level == "unknown":
         return f"{design.URGENCY_EMOJI['unknown']} Pas de date limite connue"
@@ -129,19 +133,21 @@ def build_game_message(game: dict, invite_url: str | None = None, *, variant: st
         timestamp=datetime.now(timezone.utc),
     )
     embed.set_author(name=author)
-    embed.add_field(name="💰 Prix", value=format_price(game.get("worth")), inline=True)
-    embed.add_field(name="🎮 Plateforme", value=platform_badge(game), inline=True)
-    embed.add_field(name="⏰ Fin de l'offre", value=format_time_remaining(game.get("end_date")), inline=True)
+    # Prix, plateforme et expiration regroupés sur une même ligne : libellés
+    # sobres, sans emoji — les valeurs portent le signal.
+    embed.add_field(name="Prix", value=format_price(game.get("worth")), inline=True)
+    embed.add_field(name="Plateforme", value=platform_badge(game), inline=True)
+    embed.add_field(name="Fin de l'offre", value=format_time_remaining(game.get("end_date")), inline=True)
 
     offer_type = game.get("offer_type")
     if offer_type in {"dlc", "content"}:
         embed.add_field(
-            name="🏷️ Type", value=config.OFFER_TYPE_LABELS.get(offer_type, offer_type), inline=True
+            name="Type", value=config.OFFER_TYPE_LABELS.get(offer_type, offer_type), inline=True
         )
     if mega:
         worth = offers.parse_worth_eur(game.get("worth"))
         embed.add_field(
-            name="🔥 Offre exceptionnelle",
+            name="⭐ Offre exceptionnelle",
             value=(
                 f"Jeu complet d'une valeur de **{worth:.2f} €**, offert pour une durée limitée."
                 if worth is not None
@@ -184,7 +190,7 @@ def build_game_message(game: dict, invite_url: str | None = None, *, variant: st
 def build_roles_embed() -> discord.Embed:
     """Panneau affiché dans le salon de choix des rôles."""
     embed = discord.Embed(
-        title="🎮 FreeGameDrop — choisis tes alertes jeux gratuits",
+        title="🎁 FreeGameDrop — choisis tes alertes jeux gratuits",
         description=(
             "Clique sur un bouton pour **recevoir** le rôle d'une plateforme "
             "et débloquer son salon. Reclique pour le **retirer**.\n\n"

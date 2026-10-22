@@ -36,8 +36,24 @@ def test_la_palette_est_en_hex_valide():
 
 
 def test_rgb_convertit_pour_discord():
-    assert design.rgb("#7C3AED") == 0x7C3AED
-    assert design.rgb(design.PRIMARY) == 0x7C3AED
+    assert design.rgb("#173D2B") == 0x173D2B
+    assert design.rgb(design.PRIMARY) == 0x173D2B
+
+
+def test_palette_foret_partagee_avec_overx_et_overload():
+    # Les cinq couleurs de base de l'univers commun FreeGameDrop / OverX / OverLoad.
+    assert design.FOREST == "#173D2B"
+    assert design.LEAF == "#285B40"
+    assert design.SAGE == "#91A889"
+    assert design.IVORY == "#F3F1E8"
+    assert design.GRAPHITE == "#242923"
+    # forêt = marque, feuille = boutons/actions, sauge = accents secondaires
+    assert design.PRIMARY == design.FOREST
+    assert design.ACTION == design.LEAF
+    assert design.SECONDARY == design.SAGE
+    # thème sombre graphite, texte ivoire
+    assert design.SURFACE == design.GRAPHITE
+    assert design.TEXT == design.IVORY
 
 
 def test_aucun_noir_pur_dans_les_neutres():
@@ -117,7 +133,8 @@ def test_css_variables_exposent_les_tokens():
     css = design.css_variables()
 
     assert css.startswith(":root {")
-    assert "--fgd-primary: #7C3AED;" in css
-    assert "--fgd-background: #0B0E14;" in css
+    assert "--fgd-primary: #173D2B;" in css
+    assert "--fgd-action: #285B40;" in css
+    assert "--fgd-background: #1A1E1A;" in css
     for key in design.PLATFORM_COLOURS:
         assert f"--fgd-platform-{key}:" in css

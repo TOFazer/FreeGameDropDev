@@ -237,7 +237,7 @@ LAST_HOURS_THRESHOLD: float = _env_float("LAST_HOURS_THRESHOLD", design.URGENT_H
 
 # ---------- Offres exceptionnelles ----------
 
-# Une offre est mise en avant « 🔥 Offre exceptionnelle » quand c'est un jeu complet,
+# Une offre est mise en avant « ⭐ Offre exceptionnelle » quand c'est un jeu complet,
 # temporaire, et dont la valeur explicitement libellée en euros atteint ce seuil.
 # Les valeurs non libellées en euros ne comptent jamais : rien n'est inventé.
 # Mettre 0 pour désactiver la mise en avant.

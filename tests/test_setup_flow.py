@@ -19,7 +19,7 @@ async def test_setup_cree_categorie_salons_roles(cog, guild, db):
     assert roles_channel.overwrites[guild.default_role].send_messages is False
 
     panneau = roles_channel.sent[-1]
-    assert panneau["embed"].title.startswith("🎮")
+    assert panneau["embed"].title.startswith("🎁")
     assert [b.label for b in panneau["view"].children] == ["Steam", "Epic Games Store"]
 
     assert "lecture seule" in rapport

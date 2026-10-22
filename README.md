@@ -19,7 +19,7 @@ alertes qu'il veut recevoir** — plateforme par plateforme, en un clic.
 <!-- Une instance publique du bot est en ligne ? Remplace le lien ci-dessous par ton
      invitation Discord et décommente le bloc :
 <a href="https://discord.com/oauth2/authorize?client_id=TON_CLIENT_ID&permissions=268454928&scope=bot%20applications.commands">
-  <img src="https://img.shields.io/badge/➕_Ajouter_FreeGameDrop_à_Discord-7C3AED?style=for-the-badge&logo=discord&logoColor=white" alt="Ajouter FreeGameDrop à Discord">
+  <img src="https://img.shields.io/badge/➕_Ajouter_FreeGameDrop_à_Discord-285B40?style=for-the-badge&logo=discord&logoColor=white" alt="Ajouter FreeGameDrop à Discord">
 </a>
 -->
 
@@ -30,11 +30,11 @@ alertes qu'il veut recevoir** — plateforme par plateforme, en un clic.
 ## Pourquoi FreeGameDrop ?
 
 Un membre ne veut pas recevoir « DLC random gratuit » toutes les heures.
-Il veut : **🔥 Hogwarts Legacy est GRATUIT sur Epic, dépêche-toi, il reste 22 h.**
+Il veut : **🎁 Hogwarts Legacy est GRATUIT sur Epic, dépêche-toi, il reste 22 h.**
 
 FreeGameDrop fait exactement ça — et rien d'autre :
 
-- **🔥 Offres exceptionnelles** : les gros jeux complets à forte valeur sont mis en avant
+- **⭐ Offres exceptionnelles** : les gros jeux complets à forte valeur sont mis en avant
   (critères transparents, calculés uniquement à partir des données fournies par les sources).
 - **🔔 Alertes personnalisées** : chaque membre choisit ses plateformes, ses types d'offres,
   sa valeur minimum et ses genres — et reçoit le reste en message privé, jamais en spam.
@@ -48,36 +48,37 @@ FreeGameDrop fait exactement ça — et rien d'autre :
 ## À quoi ça ressemble
 
 L'identité visuelle — couleurs, typographie, boutons, badges, embeds — est définie
-dans **[DESIGN.md](DESIGN.md)** (FreeGameDrop en trois mots : **Gaming — Moderne —
-Premium**, sous la marque mère Orvex).
+dans **[DESIGN.md](DESIGN.md)** (FreeGameDrop en trois mots : **Naturel — Moderne —
+Premium**, sous la marque mère Orvex — même univers visuel « forêt » que OverX et
+OverLoad).
 
 **Une annonce dans le salon d'une plateforme** (le filet de l'embed est toujours
-violet `#7C3AED`, quelle que soit la plateforme) :
+vert forêt `#173D2B`, quelle que soit la plateforme) :
 
 ```text
 🎁 JEU GRATUIT                          ← badge d'auteur
 ⚪ Hogwarts Legacy                      ← le nom du jeu, rien d'autre
 Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
 
-   💰 Prix                 🎮 Plateforme        ⏰ Fin de l'offre
+   Prix                    Plateforme           Fin de l'offre
    ~~59,99 €~~ ➜ GRATUIT   ⚪ Epic Games Store  🟡 dans 22 h (mar. 7 oct. …)
 
 [ 🎁 Récupérer le jeu ]   [ ➕ Ajouter FreeGameDrop ]   ← pied : 🎁 FreeGameDrop · par Orvex
 ```
 
 **L'urgence se lit en un coup d'œil** : 🟢 plus de 24 h · 🟡 moins de 24 h ·
-🟠 moins de 6 h (« 🔥 SE TERMINE BIENTÔT ») · 🔴 moins d'1 h.
+🟠 moins de 6 h (« ⏳ SE TERMINE BIENTÔT ») · 🔴 moins d'1 h.
 
 **Le gros jeu du jour passe en « offre exceptionnelle » :**
 
 ```text
-🔥 OFFRE EXCEPTIONNELLE
+⭐ OFFRE EXCEPTIONNELLE
 🔵 Cyberpunk 2077
 
-   💰 Prix                 🎮 Plateforme   ⏰ Fin de l'offre
+   Prix                    Plateforme      Fin de l'offre
    ~~59,99 €~~ ➜ GRATUIT   🔵 Steam        🟡 dans 23 heures
 
-   🔥 Offre exceptionnelle
+   ⭐ Offre exceptionnelle
    Jeu complet d'une valeur de 59,99 €, offert pour une durée limitée.
 ```
 
@@ -312,9 +313,9 @@ Puis, sur le serveur Discord : `/setup-auto`.
   de ton choix (`/acces-salon-roles`).
 - **Vérification automatique** toutes les heures, avec mention du rôle concerné, prix barré,
   compte à rebours de fin d'offre et bouton « Récupérer le jeu ».
-- **Offres exceptionnelles 🔥** : un jeu complet, temporaire et d'une valeur (libellée en
+- **Offres exceptionnelles ⭐** : un jeu complet, temporaire et d'une valeur (libellée en
   euros par la source) d'au moins `MEGA_DEAL_MIN_WORTH_EUR` est annoncé avec le bandeau
-  « 🔥 OFFRE EXCEPTIONNELLE » et l'explication chiffrée. Aucune valeur n'est inventée ni
+  « ⭐ OFFRE EXCEPTIONNELLE » et l'explication chiffrée. Aucune valeur n'est inventée ni
   convertie.
 - **Jamais deux fois le même jeu** : les annonces déjà envoyées sont mémorisées.
 - **Catalogue privé des offres** avec `/free` : navigation page par page, filtres (plateforme, type
@@ -419,7 +420,7 @@ Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confir
                         │
                    database.py        déjà annoncé ? sinon, on enregistre
                         │
-                  utils/embeds.py     construction du message (🔥 si offre exceptionnelle)
+                  utils/embeds.py     construction du message (⭐ si offre exceptionnelle)
                         │
                   #jeux-steam         @🔵 Steam nouveau jeu gratuit !
 ```
@@ -610,7 +611,7 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `DEFAULT_TIMEZONE` | `Europe/Paris` | Fuseau horaire par défaut des filtres de date de `/free`. |
 | `ALERT_CADENCE_HOURS` | `1` | Délai minimal entre deux alertes DM identiques pour un même membre. |
 | `LAST_DAY_HOURS` | `24` | Fenêtre considérée comme « se termine bientôt ». |
-| `MEGA_DEAL_MIN_WORTH_EUR` | `19.99` | Seuil de valeur (en euros, libellée par la source) pour le bandeau « 🔥 Offre exceptionnelle ». `0` désactive. |
+| `MEGA_DEAL_MIN_WORTH_EUR` | `19.99` | Seuil de valeur (en euros, libellée par la source) pour le bandeau « ⭐ Offre exceptionnelle ». `0` désactive. |
 | `DASHBOARD_ENABLED` | `false` | Démarre le tableau de bord web avec le bot. |
 | `DASHBOARD_HOST` / `DASHBOARD_PORT` | `0.0.0.0` / `8080` | Adresse d'écoute du tableau de bord. |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | — | Identifiants OAuth2 de l'application Discord, nécessaires pour la connexion sur le tableau de bord. `DISCORD_CLIENT_ID` doit être l'application du token. |

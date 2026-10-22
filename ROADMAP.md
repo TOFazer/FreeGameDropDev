@@ -151,6 +151,30 @@ disponibles : seuls les lots marqués **Livré** sont implémentés dans le code
   Docker et validation du compose, puis porte unique **CI OK** ; le déploiement DEV
   (`.github/workflows/deploy-dev.yml`) ne part qu'après une CI verte sur `main`.
 
+## Livré — V2.5 : identité visuelle « forêt » partagée avec OverX et OverLoad
+
+- **Nouvelle direction** (remplace la palette violette de la V2.3) : FreeGameDrop, OverX et
+  OverLoad partagent le même univers visuel — **vert forêt, naturel, moderne et premium**,
+  sans dégradés flashy, néons ni effets gaming. Le logo FreeGameDrop (🎁) est conservé ;
+  seules les couleurs, les libellés et les accents qui l'entourent changent. Aucune
+  fonctionnalité, commande, base de données ou détection d'offres n'est touchée.
+- **Palette commune** (`utils/design.py`) : vert forêt `#173D2B` (principale, filet des
+  embeds), vert feuille `#285B40` (boutons et actions, badge GRATUIT), vert sauge `#91A889`
+  (accents secondaires, liens), ivoire `#F3F1E8` (fonds clairs, texte sur fond sombre),
+  graphite `#242923` (fonds sombres). Tons d'urgence et « danger » adoucis en teintes
+  naturelles. Les couleurs officielles des plateformes (Steam, Epic, GOG, Ubisoft) ne
+  changent pas.
+- **Embeds plus propres** (`utils/embeds.py`) : libellés `Prix / Plateforme / Fin de
+  l'offre` sans emoji décoratif, regroupés sur une même ligne ; « ⏳ SE TERMINE BIENTÔT »
+  remplace l'ancien bandeau 🔥 ; les offres exceptionnelles gardent une mise en évidence
+  spéciale mais sobre (« ⭐ OFFRE EXCEPTIONNELLE »).
+- **Dashboard harmonisé** (`web/dashboard.py`) : même palette que le site OverX (thème
+  graphite, boutons vert feuille, liens sauge), notices dérivées des tokens — apparence de
+  produit fini plutôt que panneau d'administration générique.
+- **Restes d'ancien style corrigés** : `/stats` quitte le blurple Discord pour le vert
+  forêt, pieds d'embeds `/info` et `/stats` alignés sur le pied de marque, marque 🎁
+  utilisée de façon cohérente (panneau des rôles, en-tête du dashboard, onboarding).
+
 ## Prochains lots
 
 ### V2 — compléments

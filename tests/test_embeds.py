@@ -76,7 +76,7 @@ def test_annonce_complete_suit_la_hierarchie():
     assert embed.color.value == design.rgb(design.PRIMARY)
     assert embed.description == "Un très bon jeu"
     # 3️⃣ prix, 4️⃣ plateforme (badge), 5️⃣ fin avec emoji d'urgence
-    assert [f.name for f in embed.fields] == ["💰 Prix", "🎮 Plateforme", "⏰ Fin de l'offre"]
+    assert [f.name for f in embed.fields] == ["Prix", "Plateforme", "Fin de l'offre"]
     assert [f.value for f in embed.fields] == [
         "~~19.99~~ ➜ **GRATUIT**",
         "🔵 Steam",
@@ -144,7 +144,7 @@ def test_offre_urgente_est_signalee_dans_le_badge_et_le_champ():
     fin = (AUJOURDHUI + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
     embed, _ = embeds.build_game_message(_jeu_avec_fin(end_date=fin))
 
-    assert embed.author.name == "🔥 SE TERMINE BIENTÔT"
+    assert embed.author.name == "⏳ SE TERMINE BIENTÔT"
     assert embed.color.value == design.rgb(design.PRIMARY)  # la marque reste la marque
     assert embed.fields[2].value.startswith("🟠")
 
@@ -153,7 +153,7 @@ def test_offre_critique_en_rouge():
     fin = (AUJOURDHUI + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
     embed, _ = embeds.build_game_message(_jeu_avec_fin(end_date=fin))
 
-    assert embed.author.name == "🔥 SE TERMINE BIENTÔT"
+    assert embed.author.name == "⏳ SE TERMINE BIENTÔT"
     assert embed.fields[2].value.startswith("🔴")
 
 
@@ -192,7 +192,7 @@ def test_meme_squelette_quelle_que_soit_la_plateforme():
 
         assert embed.color.value == design.rgb(design.PRIMARY)  # jamais la couleur plateforme
         assert embed.fields[1].value == f"{emoji} {nom}"
-        assert [f.name for f in embed.fields] == ["💰 Prix", "🎮 Plateforme", "⏰ Fin de l'offre"]
+        assert [f.name for f in embed.fields] == ["Prix", "Plateforme", "Fin de l'offre"]
 
 
 # ---------- Offres exceptionnelles, branding, invitation ----------
@@ -219,8 +219,8 @@ def test_annonce_standard_reste_sobre():
 def test_annonce_exceptionnelle_est_mise_en_avant():
     embed, _ = embeds.build_game_message(_jeu_exceptionnel())
 
-    assert embed.author.name == "🔥 OFFRE EXCEPTIONNELLE"
-    assert any("🔥 Offre exceptionnelle" in (f.name or "") for f in embed.fields)
+    assert embed.author.name == "⭐ OFFRE EXCEPTIONNELLE"
+    assert any("⭐ Offre exceptionnelle" in (f.name or "") for f in embed.fields)
     assert "59.99 €" in " ".join(f.value for f in embed.fields)
 
 
