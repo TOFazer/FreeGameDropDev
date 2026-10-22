@@ -28,7 +28,12 @@ import config
 from services import epic_games, gamerpower
 from utils import monitoring
 from utils.logging_setup import log_event
-from utils.offers import classify_offer_type, normalize_genres, parse_end_datetime
+from utils.offers import (
+    classify_free_kind,
+    classify_offer_type,
+    normalize_genres,
+    parse_end_datetime,
+)
 
 log = logging.getLogger(__name__)
 
@@ -41,12 +46,19 @@ def _call_epic():
     return epic_games.fetch_giveaways()
 
 
+def _call_gamerpower_loot():
+    return gamerpower.fetch_dlc_giveaways()
+
+
 # Les valeurs sont de petites fonctions (plutôt que les méthodes directement) pour que
 # monkeypatcher `gamerpower.fetch_giveaways` ou `epic_games.fetch_giveaways` dans les tests
 # soit pris en compte, même après l'import de ce module.
 SOURCES = {
     "gamerpower": _call_gamerpower,
     "epic": _call_epic,
+    # DLC, extensions et contenus en jeu : le salon des DLC est alimenté par cette
+    # catégorie, les jeux complets ne s'y mélangent pas.
+    "gamerpower_loot": _call_gamerpower_loot,
 }
 
 
@@ -59,6 +71,8 @@ def _normalize(game: dict, source: str) -> dict:
     game.setdefault("source", source)
     game["offer_type"] = classify_offer_type(game.get("type") or game.get("offer_type"))
     game["genres"] = normalize_genres(game.get("genres"))
+    # Nature de la gratuité : jamais devinée au-delà de ce que la source prouve.
+    game["free_kind"] = classify_free_kind(game)
     return game
 
 
@@ -198,6 +212,7 @@ async def _fetch_all(sources, moment: datetime) -> tuple[list[dict], bool]:
             offer_id=game.get("id"),
             source=game.get("source"),
             offer_type=game.get("offer_type"),
+            free_kind=game.get("free_kind"),
             end_date=game.get("end_date") or None,
         )
     # Une source a réellement répondu si elle a renvoyé une liste, même vide.

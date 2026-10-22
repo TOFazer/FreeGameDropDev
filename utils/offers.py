@@ -43,8 +43,42 @@ def classify_offer_type(value: object) -> str:
     return "content"
 
 
+def classify_free_kind(game: dict) -> str:
+    """Gratuité permanente, temporaire, ou durée non communiquée.
+
+    La règle reste prudente : on n'affirme « permanent » que si la source le dit
+    explicitement (`free_kind: "permanent"` ou `permanently_free: true`). Une date
+    de fin réellement fournie rend l'offre temporaire ; sans elle, on ne devine
+    rien et l'affichage annonce que la durée n'est pas communiquée.
+    """
+    explicit = str(game.get("free_kind") or "").strip().casefold().replace("_", "-")
+    if explicit in {"permanent", "permanently-free", "always-free", "forever"}:
+        return "permanent"
+    if explicit in {"temporary", "limited", "limited-time", "temporarily-free"}:
+        return "temporary"
+    if game.get("permanently_free") is True:
+        return "permanent"
+    if game.get("permanently_free") is False:
+        return "temporary"
+    if parse_end_datetime(game.get("end_date")) is not None:
+        return "temporary"
+    return "unknown"
+
+
+def is_dlc_offer(game: dict) -> bool:
+    """L'offre est-elle une extension, un pack de contenu ou un contenu en jeu ?"""
+    return classify_offer_type(game.get("offer_type") or game.get("type")) in set(
+        config.DLC_OFFER_TYPES
+    )
+
+
+def free_kind_label(game: dict) -> str:
+    """Libellé prêt à afficher pour la nature de la gratuité."""
+    return config.FREE_KIND_LABELS.get(classify_free_kind(game), config.FREE_KIND_LABELS["unknown"])
+
+
 def offer_matches_type(game: dict, selected_types) -> bool:
-    """Les catégories sont en OU; « temporaire » est un filtre supplémentaire en ET."""
+    """Les catégories sont en OU; « temporaire »/« permanent » sont des filtres en ET."""
     selected = set(selected_types or [])
     if not selected:
         return False
@@ -54,7 +88,9 @@ def offer_matches_type(game: dict, selected_types) -> bool:
         return False
     if "temporary" in selected and parse_end_datetime(game.get("end_date")) is None:
         return False
-    return bool(category_types or "temporary" in selected)
+    if "permanent" in selected and classify_free_kind(game) != "permanent":
+        return False
+    return bool(category_types or selected.intersection({"temporary", "permanent"}))
 
 
 def parse_worth_eur(value: object) -> float | None:

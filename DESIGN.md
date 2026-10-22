@@ -189,6 +189,10 @@ testée sur mobile.
 
 Prix, plateforme et expiration sont regroupés sur une même ligne de champs, avec
 des libellés sobres sans emoji décoratif : le signal est porté par les valeurs.
+Pour une offre qui n'est pas un jeu complet (DLC, extension, contenu), deux champs
+s'ajoutent dans le même langage sobre : `Type` et `Gratuité` — « ♾️ Gratuit en
+permanence », « ⏳ Offert temporairement » ou « ❔ Durée non communiquée » quand la
+source ne permet pas de conclure. Aucune icône supplémentaire n'est inventée.
 L'image du jeu est la partie visuelle forte (pleine largeur, en bas de l'embed).
 La description, si elle existe, reste courte et secondaire. Le branding
 (`🎁 FreeGameDrop · par Orvex · Source : …`) tient dans le pied de page — discret,

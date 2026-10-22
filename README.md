@@ -39,8 +39,12 @@ FreeGameDrop fait exactement ça — et rien d'autre :
 - **🔔 Alertes personnalisées** : chaque membre choisit ses plateformes, ses types d'offres,
   sa valeur minimum et ses genres — et reçoit le reste en message privé, jamais en spam.
 - **❤️ Favoris + rappel d'expiration** : « Ton jeu favori expire dans 6 heures. »
-- **🛰️ Multi-sources résilientes** : GamerPower **et** l'API officielle Epic Games Store,
-  agrégées en parallèle ; une source en panne ne bloque jamais les autres.
+- **🧩 Salon des DLC séparé** : les jeux complets restent dans les salons par plateforme,
+  les extensions, packs de contenu et objets cosmétiques gratuits vont dans `#dlc-gratuits`,
+  avec son propre rôle à activer.
+- **🛰️ Multi-sources résilientes** : GamerPower (jeux complets **et** catégorie `loot` pour
+  les DLC) et l'API officielle Epic Games Store, agrégées en parallèle ; une source en panne
+  ne bloque jamais les autres.
 - **📊 Chiffres publics** : `/stats` n'affiche que des valeurs réellement mesurées par le bot.
 - **🔐 Vie privée sérieuse** : réponses éphémères, données minimales, suppression en une
   commande, aucune donnée de message stockée.
@@ -92,6 +96,7 @@ Un RPG d'action en monde ouvert dans l'univers de Harry Potter…
  │      [ 🔵 Steam ] [ ⚪ Epic Games Store ] [ 🟣 GOG ] [ 🔷 Ubisoft ]
  ├── #jeux-steam                  ← visible seulement avec le rôle 🔵 Steam
  ├── #jeux-epic                   ← visible seulement avec le rôle ⚪ Epic Games Store
+ ├── #dlc-gratuits                ← DLC et contenus, visible avec le rôle 🧩 DLC gratuits
  └── …
 ```
 
@@ -306,6 +311,13 @@ Puis, sur le serveur Discord : `/setup-auto`.
 `/setup-auto` construit tout en une fois : catégorie, rôles, salons, panneau de boutons.
 
 - **Un rôle + un salon par plateforme.** Le salon est invisible tant qu'on n'a pas le rôle.
+- **Un salon dédié aux DLC** (`#dlc-gratuits`) : extensions, packs de contenu et objets
+  cosmétiques gratuits y sont séparés des jeux complets, avec leur propre rôle et leur
+  propre mention. L'admin peut l'inclure ou le masquer d'un bouton dans `/setup-auto` ;
+  un salon masqué est réactivé sans doublon.
+- **Gratuité permanente ou temporaire** : quand une source le prouve, l'annonce l'indique
+  (« ♾️ Gratuit en permanence », « ⏳ Offert temporairement ») ; sinon elle dit honnêtement
+  que la durée n'est pas communiquée. Aucune déduction abusive.
 - **Auto-attribution des rôles** : un clic sur un bouton donne (ou retire) le rôle.
 - **Salons en lecture seule** : voir, lire et cliquer, rien d'autre. Ni messages, ni réactions,
   ni fils, ni sondages — pour personne.
@@ -319,7 +331,10 @@ Puis, sur le serveur Discord : `/setup-auto`.
   convertie.
 - **Jamais deux fois le même jeu** : les annonces déjà envoyées sont mémorisées.
 - **Catalogue privé des offres** avec `/free` : navigation page par page, filtres (plateforme, type
-  d'offre, échéance) et lien pour récupérer le jeu.
+  d'offre, échéance) et lien pour récupérer le jeu. `/dlc` fait de même pour les seuls DLC et
+  contenus, sans jamais mélanger les jeux complets.
+- **Récapitulatif** : `/recap` regroupe dans un seul message les offres découvertes récemment
+  (24 h par défaut, de 1 à 168 h), jeux complets et DLC confondus.
 - **Favoris personnels** : bouton ❤️, commande `/favoris` et commande `/mes-donnees` pour effacer ses favoris.
 - **Historique et recherche** : `/historique` revoit les dernières offres connues, `/recherche`
   retrouve une offre par mot-clé.
@@ -356,13 +371,15 @@ Les commandes de configuration sont réservées aux administrateurs. Les command
 
 | Commande | Accès | Effet |
 | --- | --- | --- |
-| `/setup-auto` | Admin | Coche les plateformes et clique sur **Créer / mettre à jour**. Crée/répare catégorie, rôles, salons et panneau ; les plateformes décochées sont masquées et réactivables. Lance une première vérification des offres immédiatement. |
+| `/setup-auto` | Admin | Coche les plateformes, garde ou masque le salon des DLC, puis clique sur **Créer / mettre à jour**. Crée/répare catégorie, rôles, salons et panneau ; les plateformes décochées et le salon DLC masqué sont réactivables sans doublon. Lance une première vérification des offres immédiatement. |
 | `/config` | Admin | Rouvre le même panneau de configuration que `/setup-auto`. |
 | `/acces-salon-roles` | Admin | Change les rôles autorisés à voir `#choisir-ses-roles` (menu vide = tout le monde). Le salon reste en lecture seule. |
 | `/test-jeux` | Admin | Force une vérification immédiate des jeux gratuits. |
 | `/reset-jeux` | Admin | Vide l'historique des envois : les jeux récents peuvent être réannoncés. |
 | `/reset-all` | Admin | Supprime tout ce que le bot a créé (salons, rôles, catégorie, messages). Demande confirmation. |
 | `/free` | Tout le monde | Parcourt les offres agrégées (GamerPower, Epic Games Store, …), avec filtres optionnels par plateforme, type d'offre et échéance. La réponse est éphémère ; les boutons permettent de parcourir et d'enregistrer un favori. Les offres sont mises en cache une minute (`OFFER_CACHE_SECONDS`) et limitées à quelques requêtes par membre et par minute. |
+| `/dlc` | Tout le monde | Comme `/free`, mais uniquement les DLC, extensions et contenus gratuits, avec le filtre d'échéance. Réponse éphémère, pagination et favoris disponibles. |
+| `/recap` | Tout le monde | Récapitule en un message les offres découvertes pendant la fenêtre demandée (24 h par défaut, 1 à 168 h) : nombre de jeux complets, de DLC et d'offres réellement permanentes. |
 | `/favoris` | Tout le monde | Affiche ses favoris en privé ; le bouton permet de retirer une offre. |
 | `/historique` | Tout le monde | Revoit les dernières offres connues du bot, avec les mêmes filtres que `/free`. |
 | `/recherche` | Tout le monde | Recherche une offre déjà connue par titre ou description. |
@@ -383,7 +400,7 @@ Les commandes de configuration sont réservées aux administrateurs. Les command
 Le bot utilise SQLite (`DB_PATH`) et conserve :
 
 - la configuration technique des serveurs (identifiants de salons et rôles) et les identifiants d'offres déjà annoncées, pour éviter les doublons ;
-- les champs publics d'une offre (identifiant, titre, plateforme, source, type, valeur, liens, description, genres et dates) ;
+- les champs publics d'une offre (identifiant, titre, plateforme, source, type, nature de la gratuité, valeur, liens, description, genres et dates) ;
 - pour les favoris, l'identifiant Discord du membre, l'identifiant de l'offre et la date d'ajout ;
 - pour les préférences et alertes personnelles (`/preferences`, `/alertes`), les réglages choisis, liés uniquement à l'identifiant Discord du membre ;
 - un historique minimal des alertes déjà envoyées (membre, offre, type d'alerte) pour éviter les doublons et respecter un délai minimal entre deux alertes identiques ;
@@ -407,7 +424,8 @@ Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confir
 ```
                  toutes les heures
                         │
-      services/gamerpower.py ──► API GamerPower
+      services/gamerpower.py ──► API GamerPower (jeux complets, type=game)
+      services/gamerpower.py ──► API GamerPower (DLC et contenus, type=loot)
       services/epic_games.py ──► API Epic Games Store
                         │
               services/offer_engine.py   agrégation, vérification, cache court
@@ -422,7 +440,10 @@ Pour supprimer les favoris liés à ton compte, utilise `/mes-donnees` et confir
                         │
                   utils/embeds.py     construction du message (⭐ si offre exceptionnelle)
                         │
-                  #jeux-steam         @🔵 Steam nouveau jeu gratuit !
+              ┌─────────┴──────────┐
+      #jeux-steam               #dlc-gratuits
+ @🔵 Steam nouveau jeu      @🧩 DLC nouveau DLC gratuit !
+    gratuit !               (extensions, contenus — jamais les jeux complets)
 ```
 
 Côté permissions, la règle est simple : **les salons du bot se lisent, ils ne s'écrivent pas.**
@@ -444,7 +465,7 @@ compte fasse exploser le nombre d'appels :
 
 | Portée | Exemples | Valeur par défaut |
 | --- | --- | --- |
-| Par membre | `/free` (4/min), `/recherche` (8/min), boutons (60/min) | `RATE_LIMIT_FREE_PER_MINUTE`, `RATE_LIMIT_USER_PER_MINUTE` |
+| Par membre | `/free` et `/dlc` (4/min), `/recherche` (8/min), `/recap` (4/min), boutons (60/min) | `RATE_LIMIT_FREE_PER_MINUTE`, `RATE_LIMIT_USER_PER_MINUTE` |
 | Par serveur | `/setup-auto`, `/config`, `/acces-salon-roles`, `/rappel-salon` (6/min) | `RATE_LIMIT_ADMIN_PER_MINUTE` |
 | Par serveur, actions lourdes | `/test-jeux`, `/reset-jeux`, `/reset-all` (3/10 min) | `RATE_LIMIT_ADMIN_HEAVY_PER_10_MINUTES` |
 | Appels aux sources | cache d'une minute + appel unique partagé entre commandes simultanées | `OFFER_CACHE_SECONDS` |
@@ -575,6 +596,7 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `DB_PATH` | `data/freegamedrop-dev.db` en DEV, `bot.db` en PROD | Fichier SQLite (dossier créé automatiquement). |
 | `CHECK_INTERVAL_HOURS` | `1` | Fréquence de vérification. |
 | `MAX_GAMES` | `10` | Jeux récents examinés à chaque tour. |
+| `MAX_DLC_GAMES` | `5` | DLC/contenus examinés et annoncés au maximum à chaque tour (la source `loot` en publie beaucoup plus que de jeux). |
 | `LOG_LEVEL` | `DEBUG` en DEV, `INFO` en PROD | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `LOG_FILE` | *(vide)* | Fichier de journal supplémentaire (rotation 5 Mo × 3) ; vide = sortie standard uniquement. |
 | `LOG_PSEUDONYMIZE_IDS` | `false` | Remplace les identifiants Discord par une empreinte stable dans les logs. |
@@ -584,13 +606,15 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `VOTE_URL` | *(vide)* | Lien de vote affiché par `/info`, si le bot est référencé sur un annuaire. |
 | `CATEGORY_NAME` | `🎮 Jeux gratuits` | Nom de la catégorie créée. |
 | `ROLES_CHANNEL` | `choisir-ses-roles` | Nom du salon de choix des rôles. |
+| `DLC_CHANNEL` | `dlc-gratuits` | Nom du salon unique des DLC et contenus gratuits. |
+| `DLC_ROLE_LABEL` / `DLC_EMOJI` | `DLC gratuits` / `🧩` | Nom (sans emoji) et emoji du rôle qui donne accès au salon des DLC. |
 | `TEST_GUILD_ID` | *(serveur de test)* | Serveur dont on purge les anciennes commandes au démarrage ; `0` pour désactiver. |
 | `GAMERPOWER_API_URL` | API GamerPower | Source des jeux. |
 | `GAMERPOWER_TIMEOUT` | `15` | Délai d'attente réseau, en secondes. |
 | `EPIC_API_URL` | API Epic Games Store | Source des jeux offerts chaque semaine. |
 | `EPIC_TIMEOUT` | `15` | Délai d'attente réseau, en secondes. |
 | `EPIC_LOCALE` / `EPIC_COUNTRY` | `fr-FR` / `FR` | Langue et pays utilisés pour interroger l'Epic Games Store. |
-| `OFFER_SOURCES` | `gamerpower,epic` | Sources activées pour `/free`, les alertes et la veille automatique. |
+| `OFFER_SOURCES` | `gamerpower,epic,gamerpower_loot` | Sources activées pour `/free`, les alertes et la veille automatique. `gamerpower_loot` interroge GamerPower avec `type=loot` : c'est la catégorie qui contient les DLC et contenus (la documentation de l'API ne propose pas de filtre « dlc » distinct). Sans elle, le salon des DLC reste vide. |
 | `OFFER_SOURCE_TIMEOUT` | `20` | Délai maximal accordé à chaque source avant de l'ignorer pour ce tour. |
 | `OFFER_CACHE_SECONDS` | `60` | Durée de réutilisation des offres pour `/free` (un seul appel partagé entre commandes simultanées). |
 | `RATE_LIMIT_USER_PER_MINUTE` | `20` | Plafond, par membre, toutes commandes de lecture confondues. |

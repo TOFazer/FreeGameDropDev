@@ -33,6 +33,24 @@ def _no_real_epic_calls(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_gamerpower_loot_calls(request, monkeypatch):
+    """Le salon des DLC ne doit jamais déclencher un vrai appel réseau en test.
+
+    `tests/test_gamerpower.py` teste les appels eux-mêmes et gère ses propres
+    doubles : il est exclu de ce garde-fou.
+    """
+    if "test_gamerpower" in request.node.nodeid:
+        return
+
+    async def _empty():
+        return []
+
+    from services import gamerpower
+
+    monkeypatch.setattr(gamerpower, "fetch_dlc_giveaways", _empty)
+
+
+@pytest.fixture(autouse=True)
 def _no_send_spacing(monkeypatch):
     """Les tests simulent Discord en mémoire : aucun espacement d'envoi nécessaire."""
     monkeypatch.setattr(rate_limits.DISCORD_THROTTLE, "interval_seconds", 0.0)

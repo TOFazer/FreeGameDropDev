@@ -111,6 +111,9 @@ DB_PATH: str = _env_str(
 
 CHECK_INTERVAL_HOURS: float = _env_float("CHECK_INTERVAL_HOURS", 1.0)
 MAX_GAMES: int = _env_int("MAX_GAMES", 10)  # jeux récents examinés à chaque tour
+# Plafond propre aux DLC/contenus : la source GamerPower en publie beaucoup plus que
+# de jeux complets. Sans plafond, le salon des DLC serait noyé à chaque vérification.
+MAX_DLC_GAMES: int = _env_int("MAX_DLC_GAMES", 5)
 
 
 # ---------- API GamerPower ----------
@@ -134,9 +137,12 @@ EPIC_COUNTRY: str = _env_str("EPIC_COUNTRY", "FR")
 # ---------- Moteur d'agrégation multi-sources ----------
 
 # Sources activées pour /free, les alertes et la veille automatique.
+# « gamerpower_loot » interroge GamerPower avec `type=loot`, la seule catégorie
+# documentée qui contient les DLC et contenus en jeu. Sans elle, le bot ne voit
+# que les jeux complets : le salon des DLC resterait vide.
 OFFER_SOURCES: tuple = tuple(
     source.strip()
-    for source in _env_str("OFFER_SOURCES", "gamerpower,epic").split(",")
+    for source in _env_str("OFFER_SOURCES", "gamerpower,epic,gamerpower_loot").split(",")
     if source.strip()
 )
 OFFER_SOURCE_TIMEOUT: float = _env_float("OFFER_SOURCE_TIMEOUT", 20.0)
@@ -199,6 +205,20 @@ OFFER_TYPE_LABELS: dict = {
 }
 OFFER_TYPE_KEYS = list(OFFER_TYPE_LABELS)
 
+# Les offres qui ne sont pas des jeux complets : elles vont dans le salon des DLC.
+DLC_OFFER_TYPES = ("dlc", "content")
+
+# Une source dit rarement si une gratuité est permanente ou limitée dans le temps.
+# On ne l'affirme donc jamais sans preuve : « temporaire » repose sur une date de fin
+# réellement fournie, « permanent » sur un champ explicite de la source, sinon on
+# annonce honnêtement que la durée n'est pas communiquée.
+FREE_KIND_LABELS: dict = {
+    "permanent": "♾️ Gratuit en permanence",
+    "temporary": "⏳ Offert temporairement",
+    "unknown": "❔ Durée non communiquée",
+}
+FREE_KIND_KEYS = list(FREE_KIND_LABELS)
+
 GENRE_LABELS: dict = {
     "action": "Action",
     "adventure": "Aventure",
@@ -251,6 +271,25 @@ ROLES_CHANNEL: str = _env_str("ROLES_CHANNEL", "choisir-ses-roles")
 ROLES_TOPIC: str = "Clique sur un bouton pour recevoir les alertes • salon en lecture seule"
 GAME_CHANNEL_PREFIX: str = "jeux-"
 MAX_ACCESS_ROLES: int = 10  # rôles maximum autorisés à voir le salon des rôles
+
+
+# ---------- Salon des DLC gratuits ----------
+
+# Salon unique, séparé des salons par plateforme : les jeux complets et les
+# extensions/contenus gratuits ne se mélangent plus. Le salon possède son propre
+# rôle, attribué par le panneau de choix ; il reste en lecture seule et invisible
+# sans le rôle, comme les salons par plateforme.
+DLC_CHANNEL: str = _env_str("DLC_CHANNEL", "dlc-gratuits")
+DLC_TOPIC: str = _env_str(
+    "DLC_TOPIC", "DLC, extensions et contenus gratuits • salon en lecture seule"
+)
+DLC_EMOJI: str = _env_str("DLC_EMOJI", "🧩")
+DLC_ROLE_LABEL: str = _env_str("DLC_ROLE_LABEL", "DLC gratuits")
+DLC_ROLE_NAME: str = f"{DLC_EMOJI} {DLC_ROLE_LABEL}"
+# Clé interne du salon des DLC. Elle n'est jamais une plateforme : elle ne doit donc
+# pas apparaître dans PLATFORMS ni dans les choix de plateformes de /free.
+DLC_ROUTE: str = "dlc"
+DLC_COLOUR: int = design.rgb(design.SECONDARY)
 
 
 # ---------- Plateformes suivies ----------

@@ -80,6 +80,18 @@ def _original_price_text(element: dict) -> str:
     return str(original or "")
 
 
+# Types de produits Epic qui ne sont pas des jeux complets. Tout le reste est
+# présenté comme un jeu : cette source ne sert qu'aux promotions gratuites, et
+# mieux vaut ne pas envoyer un jeu complet dans le salon des DLC par erreur.
+_DLC_OFFER_TYPES = {"dlc", "add_on", "addon", "expansion", "expansion_pack", "pack"}
+
+
+def _offer_type(element: dict) -> str:
+    """Type normalisé d'une offre Epic à partir de son `offerType` explicite."""
+    raw = str(element.get("offerType") or "").strip().casefold().replace("-", "_")
+    return "dlc" if raw in _DLC_OFFER_TYPES else "game"
+
+
 def _discount_price_is_zero(element: dict) -> bool | None:
     """Le prix actuel est-il nul ? None quand l'information n'est pas fournie.
 
@@ -123,7 +135,7 @@ def _parse_element(element: dict) -> dict | None:
         "gamerpower_url": claim_url,
         "thumbnail": _thumbnail(element),
         "published_date": str(offer.get("startDate") or "").replace("T", " ").replace("Z", ""),
-        "type": "game",
+        "type": _offer_type(element),
         "genres": [],
         "source": SOURCE_KEY,
         # Promo vérifiée ici même : remise à 0 % et prix actuel nul (ou inconnu).

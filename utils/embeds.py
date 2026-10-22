@@ -30,6 +30,7 @@ from utils import design, offers, platforms
 
 SOURCE_LABELS = {
     "gamerpower": "GamerPower",
+    "gamerpower_loot": "GamerPower · DLC",
     "epic": "Epic Games Store",
 }
 
@@ -144,6 +145,10 @@ def build_game_message(game: dict, invite_url: str | None = None, *, variant: st
         embed.add_field(
             name="Type", value=config.OFFER_TYPE_LABELS.get(offer_type, offer_type), inline=True
         )
+        # Une extension gratuite en permanence n'a pas la même valeur qu'un DLC
+        # offert quelques jours : on l'affiche, sans jamais deviner au-delà de ce
+        # que la source prouve (voir utils.offers.classify_free_kind).
+        embed.add_field(name="Gratuité", value=offers.free_kind_label(game), inline=True)
     if mega:
         worth = offers.parse_worth_eur(game.get("worth"))
         embed.add_field(
@@ -190,11 +195,12 @@ def build_game_message(game: dict, invite_url: str | None = None, *, variant: st
 def build_roles_embed() -> discord.Embed:
     """Panneau affiché dans le salon de choix des rôles."""
     embed = discord.Embed(
-        title="🎁 FreeGameDrop — choisis tes alertes jeux gratuits",
+        title="🎁 FreeGameDrop — choisis tes alertes gratuites",
         description=(
-            "Clique sur un bouton pour **recevoir** le rôle d'une plateforme "
-            "et débloquer son salon. Reclique pour le **retirer**.\n\n"
-            "Tu seras mentionné quand un jeu gratuit sort sur cette plateforme."
+            "Clique sur un bouton pour **recevoir** le rôle d'une plateforme ou le rôle "
+            "du salon des **DLC gratuits**, et débloquer le salon correspondant. "
+            "Reclique pour le **retirer**.\n\n"
+            "Tu seras mentionné quand un jeu ou un DLC gratuit correspond à ce que tu suis."
         ),
         color=design.embed_colour("new"),
     )

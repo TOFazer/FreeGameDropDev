@@ -121,6 +121,25 @@ async def test_seules_les_offres_actives_sont_gratuites(api):
     assert jeu["end_date"] == "2026-10-08 15:00:00.000"
 
 
+async def test_un_add_on_epic_est_classe_dlc(api):
+    add_on = dict(PROMO_GRATUITE, id="dlc789", title="Extension", offerType="DLC")
+    api(FakeResponse(payload=_payload([add_on])))
+
+    (offre,) = await epic_games.fetch_giveaways()
+
+    # Le salon des DLC reçoit les extensions ; les jeux complets restent dans
+    # les salons par plateforme.
+    assert offre["type"] == "dlc"
+
+
+async def test_un_jeu_epic_reste_un_jeu_complet(api):
+    api(FakeResponse(payload=_payload([PROMO_GRATUITE])))
+
+    (offre,) = await epic_games.fetch_giveaways()
+
+    assert offre["type"] == "game"
+
+
 async def test_aucune_offre_active(api):
     api(FakeResponse(payload=_payload([PROMO_A_VENIR])))
 
