@@ -595,8 +595,8 @@ Tout est dans `config.py`, surchargeable par le fichier `.env` (voir `.env.examp
 | `DISCORD_TOKEN` | — | **Obligatoire.** Token du bot (`.env` uniquement, jamais versionné). |
 | `DB_PATH` | `data/freegamedrop-dev.db` en DEV, `bot.db` en PROD | Fichier SQLite (dossier créé automatiquement). |
 | `CHECK_INTERVAL_HOURS` | `1` | Fréquence de vérification. |
-| `MAX_GAMES` | `10` | Jeux récents examinés à chaque tour. |
-| `MAX_DLC_GAMES` | `5` | DLC/contenus examinés et annoncés au maximum à chaque tour (la source `loot` en publie beaucoup plus que de jeux). |
+| `MAX_GAMES` | `10` | Nouveaux jeux complets annoncés au maximum par serveur à chaque tour (les offres déjà envoyées ne comptent pas). |
+| `MAX_DLC_GAMES` | `5` | Nouveaux DLC/contenus annoncés au maximum par serveur à chaque tour (la source `loot` en publie beaucoup plus que de jeux). |
 | `LOG_LEVEL` | `DEBUG` en DEV, `INFO` en PROD | `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `LOG_FILE` | *(vide)* | Fichier de journal supplémentaire (rotation 5 Mo × 3) ; vide = sortie standard uniquement. |
 | `LOG_PSEUDONYMIZE_IDS` | `false` | Remplace les identifiants Discord par une empreinte stable dans les logs. |

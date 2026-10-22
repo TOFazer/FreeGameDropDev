@@ -204,6 +204,25 @@ async def test_plafond_des_dlc(cog, guild, db, monkeypatch):
     assert len(dlc_channel.sent) == config.MAX_DLC_GAMES
 
 
+async def test_plafond_des_dlc_ne_bloque_pas_les_suivants(cog, guild, db, monkeypatch):
+    """Régression : les DLC déjà envoyés ne doivent jamais bloquer ceux au-delà de MAX_DLC_GAMES."""
+    monkeypatch.setattr(config, "MAX_DLC_GAMES", 5)
+    await cog.apply_setup(guild, ["steam"], [])
+    dlc_channel = guild.get_channel(await db.get_dlc_channel(guild.id))
+    catalogue_dlc = [dict(DLC_STEAM, id=f"dlc:{i}", title=f"DLC {i}") for i in range(1, 13)]
+    _patch_sources(monkeypatch, dlc=catalogue_dlc)
+
+    assert await cog.run_check() == 5
+    assert await cog.run_check() == 5
+    assert await cog.run_check() == 2
+    assert await cog.run_check() == 0
+
+    catalogue_dlc.append(dict(DLC_STEAM, id="dlc:13", title="DLC 13"))
+    _patch_sources(monkeypatch, dlc=catalogue_dlc)
+    assert await cog.run_check() == 1
+    assert len(dlc_channel.sent) == 13
+
+
 async def test_un_dlc_reste_un_dlc_dans_les_favoris(db):
     await db.save_giveaways([DLC_STEAM])
     await db.toggle_favorite(42, str(DLC_STEAM["id"]))

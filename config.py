@@ -110,9 +110,11 @@ DB_PATH: str = _env_str(
 # ---------- Vérification des jeux ----------
 
 CHECK_INTERVAL_HOURS: float = _env_float("CHECK_INTERVAL_HOURS", 1.0)
-MAX_GAMES: int = _env_int("MAX_GAMES", 10)  # jeux récents examinés à chaque tour
+# Plafonds de NOUVELLES offres annoncées par serveur à chaque tour (les offres déjà
+# envoyées ne comptent pas : une nouveauté plus loin dans le flux n'est jamais bloquée).
+MAX_GAMES: int = _env_int("MAX_GAMES", 10)
 # Plafond propre aux DLC/contenus : la source GamerPower en publie beaucoup plus que
-# de jeux complets. Sans plafond, le salon des DLC serait noyé à chaque vérification.
+# de jeux complets. Sans plafond, le salon des DLC serait noyé au premier passage.
 MAX_DLC_GAMES: int = _env_int("MAX_DLC_GAMES", 5)
 
 

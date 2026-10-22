@@ -169,3 +169,18 @@ async def test_api_injoignable(api, panne):
 async def test_element_malforme_nempeche_pas_les_autres(api):
     api(FakeResponse(payload=_payload([{"promotions": "invalide"}, PROMO_GRATUITE])))
     assert len(await epic_games.fetch_giveaways()) == 1
+
+
+async def test_slug_crochets_vides_bascule_sur_catalog_ns(api):
+    """Certains bundles Epic exposent `productSlug: "[]"` : le lien doit rester valide."""
+    bundle = {
+        **PROMO_GRATUITE,
+        "offerMappings": [],
+        "productSlug": "[]",
+        "catalogNs": {"mappings": [{"pageSlug": "vrai-slug"}]},
+    }
+    api(FakeResponse(payload=_payload([bundle])))
+
+    (offre,) = await epic_games.fetch_giveaways()
+
+    assert offre["open_giveaway_url"].endswith("/p/vrai-slug")

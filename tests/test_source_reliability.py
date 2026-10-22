@@ -263,3 +263,48 @@ async def test_un_flux_vide_est_mis_en_cache(monkeypatch):
     await offer_engine.fetch_offers(use_cache=True)
 
     assert len(appels) == 1  # une source qui répond « rien » a bien répondu
+
+
+async def test_erreur_http_ou_timeout_reel_remonte_dans_sante(monkeypatch):
+    """Un HTTP 403/503 ou timeout dans epic_games/gamerpower doit alerter `/sante`."""
+
+    class _ErrorResponse:
+        status = 403
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Session403:
+        def __init__(self, timeout=None):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def get(self, url, params=None):
+            if "epic" in str(url):
+                return _ErrorResponse()
+            raise asyncio.TimeoutError()
+
+    # Rétablit les vraies fonctions des services (neutralisées par conftest par défaut).
+    monkeypatch.setattr(epic_games, "fetch_giveaways", offer_engine._DEFAULT_EPIC_FETCH)
+    monkeypatch.setattr(gamerpower, "fetch_giveaways", offer_engine._DEFAULT_GAMERPOWER_FETCH)
+    monkeypatch.setattr(epic_games.aiohttp, "ClientSession", _Session403)
+
+    assert await offer_engine.fetch_offers(use_cache=True) == []
+    assert offer_engine.cached_offers() is None  # panne totale : rien n'est mis en cache
+
+    etat_epic = monitoring.HEALTH.source("epic")
+    assert etat_epic.consecutive_failures == 1
+    assert "403" in etat_epic.last_error
+    assert monitoring.HEALTH.source_status("epic") is monitoring.Status.DEGRADED
+
+    etat_gp = monitoring.HEALTH.source("gamerpower")
+    assert etat_gp.total_timeout == 1
+    assert monitoring.HEALTH.source_status("gamerpower") is monitoring.Status.DEGRADED

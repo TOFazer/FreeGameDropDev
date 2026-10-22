@@ -93,3 +93,57 @@ async def test_liste_sources_vide_nappelle_rien(monkeypatch):
     monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", fetch)
     assert await offer_engine.fetch_offers(sources=[]) == []
     fetch.assert_not_called()
+
+
+async def test_fusion_en_alternance_entre_sources(monkeypatch):
+    """Un gros catalogue GamerPower ne doit jamais reléguer Epic en queue de liste."""
+    gp_offers = [{"id": f"gp:{i}", "title": f"GP {i}", "type": "game"} for i in range(1, 26)]
+    epic_offers = [
+        {"id": "epic:a", "title": "Epic A", "type": "game", "source": "epic"},
+        {"id": "epic:b", "title": "Epic B", "type": "game", "source": "epic"},
+    ]
+    monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", lambda: _ok(gp_offers))
+    monkeypatch.setitem(offer_engine.SOURCES, "epic", lambda: _ok(epic_offers))
+
+    games = await offer_engine.fetch_offers()
+
+    assert [g["id"] for g in games[:5]] == ["gp:1", "epic:a", "gp:2", "epic:b", "gp:3"]
+    assert len(games) == 27
+
+
+async def test_doublon_ou_entree_expiree_ne_bloque_pas_lautre_source(monkeypatch):
+    """Une entrée rejetée dans la 1re source ne doit pas confisquer l'ID à la 2e."""
+    gp_offers = [
+        {"id": "partage", "title": "Expiré côté GP", "free_verified": False},
+        {"id": "gp:1", "title": "GP 1", "type": "game"},
+        {"id": "gp:1", "title": "GP 1 doublon", "type": "game"},
+        {"id": "gp:2", "title": "GP 2", "type": "game"},
+    ]
+    epic_offers = [
+        {"id": "partage", "title": "Actif côté Epic", "free_verified": True, "source": "epic"},
+        {"id": "epic:2", "title": "Epic 2", "type": "game", "source": "epic"},
+    ]
+    monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", lambda: _ok(gp_offers))
+    monkeypatch.setitem(offer_engine.SOURCES, "epic", lambda: _ok(epic_offers))
+
+    games = await offer_engine.fetch_offers()
+
+    assert [g["id"] for g in games] == ["gp:1", "partage", "gp:2", "epic:2"]
+    assert next(g for g in games if g["id"] == "partage")["source"] == "epic"
+
+
+async def test_identifiant_zero_accepte_mais_booleens_rejetes(monkeypatch):
+    entrees = [
+        {"id": 0, "title": "Jeu zéro", "type": "game"},
+        {"id": False, "title": "Faux booléen", "type": "game"},
+        {"id": True, "title": "Vrai booléen", "type": "game"},
+        {"id": "   ", "title": "Vide", "type": "game"},
+        {"id": None, "title": "Absent", "type": "game"},
+    ]
+    monkeypatch.setitem(offer_engine.SOURCES, "gamerpower", lambda: _ok(entrees))
+
+    games = await offer_engine.fetch_offers(sources=["gamerpower"])
+
+    assert [g["id"] for g in games] == [0]
+    assert offer_engine.reject_reason({"id": 0, "title": "Jeu zéro"}) is None
+    assert offer_engine.reject_reason({"id": False, "title": "Faux"}) == "identifiant manquant"

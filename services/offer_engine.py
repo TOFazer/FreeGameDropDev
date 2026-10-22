@@ -38,15 +38,26 @@ from utils.offers import (
 log = logging.getLogger(__name__)
 
 
+_DEFAULT_GAMERPOWER_FETCH = gamerpower.fetch_giveaways
+_DEFAULT_EPIC_FETCH = epic_games.fetch_giveaways
+_DEFAULT_GAMERPOWER_DLC_FETCH = gamerpower.fetch_dlc_giveaways
+
+
 def _call_gamerpower():
+    if gamerpower.fetch_giveaways is _DEFAULT_GAMERPOWER_FETCH:
+        return gamerpower.fetch_giveaways(raise_on_error=True)
     return gamerpower.fetch_giveaways()
 
 
 def _call_epic():
+    if epic_games.fetch_giveaways is _DEFAULT_EPIC_FETCH:
+        return epic_games.fetch_giveaways(raise_on_error=True)
     return epic_games.fetch_giveaways()
 
 
 def _call_gamerpower_loot():
+    if gamerpower.fetch_dlc_giveaways is _DEFAULT_GAMERPOWER_DLC_FETCH:
+        return gamerpower.fetch_dlc_giveaways(raise_on_error=True)
     return gamerpower.fetch_dlc_giveaways()
 
 
@@ -64,6 +75,14 @@ SOURCES = {
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _offer_id(game: dict) -> str:
+    """Identifiant texte d'une offre, ou chaîne vide s'il est absent (`0` reste valide)."""
+    raw = game.get("id")
+    if raw is None or isinstance(raw, bool):
+        return ""
+    return str(raw).strip()
 
 
 def _normalize(game: dict, source: str) -> dict:
@@ -84,7 +103,7 @@ def reject_reason(game: dict, *, now: datetime | None = None) -> str | None:
     on refuse toute offre que la source elle-même contredit (déjà terminée, statut
     non actif) ou qu'on ne saurait pas présenter (sans titre, lien invalide).
     """
-    if not str(game.get("id") or "").strip():
+    if not _offer_id(game):
         return "identifiant manquant"
     if not str(game.get("title") or "").strip():
         return "titre manquant"
@@ -142,7 +161,7 @@ async def _fetch_source(name: str, fetch, moment: datetime) -> tuple[list[dict],
 
     normalized = []
     for index, game in enumerate(games):
-        if not isinstance(game, dict) or game.get("id") is None or not str(game.get("id")).strip():
+        if not isinstance(game, dict) or not _offer_id(game):
             log_event(
                 "offer.skipped",
                 level=logging.DEBUG,
@@ -159,8 +178,8 @@ async def _fetch_source(name: str, fetch, moment: datetime) -> tuple[list[dict],
     return normalized, True
 
 
-def _verify(offers: list[dict], moment: datetime) -> list[dict]:
-    """Écarte les offres non annonçables et journalise ce qui a été écarté."""
+def _filter_valid_offers(offers: list[dict], moment: datetime) -> tuple[list[dict], int]:
+    """Sépare les offres annonçables des entrées rejetées et journalise chaque rejet."""
     verified = []
     rejected = 0
     for game in offers:
@@ -176,23 +195,43 @@ def _verify(offers: list[dict], moment: datetime) -> list[dict]:
             source=game.get("source"),
             reason=reason,
         )
+    return verified, rejected
+
+
+def _verify(offers: list[dict], moment: datetime) -> list[dict]:
+    """Écarte les offres non annonçables et journalise ce qui a été écarté."""
+    verified, rejected = _filter_valid_offers(offers, moment)
     if rejected:
         log_event("offers.filtered", rejected=rejected, kept=len(verified))
     return verified
 
 
 def _merge(results: list[list[dict]]) -> list[dict]:
-    seen_ids = set()
+    """Fusionne les sources en alternance (round-robin) et dédoublonne par identifiant.
+
+    Alterner une offre valide par source évite qu'un catalogue volumineux (comme
+    GamerPower) relègue systématiquement les autres sources (comme Epic Games Store)
+    en fin de liste lors des annonces ou dans `/free`.
+    """
+    seen_ids: set[str] = set()
     merged: list[dict] = []
-    for games in results:
-        for game in games:
-            item_id = str(game.get("id") or "").strip()
-            if not item_id or item_id in seen_ids:
-                if item_id:
-                    log_event("offer.duplicate", offer_id=item_id, source=game.get("source"))
-                continue
-            seen_ids.add(item_id)
-            merged.append(game)
+    iterators = [iter(games) for games in results if games]
+    while iterators:
+        active_next = []
+        for iterator in iterators:
+            for game in iterator:
+                if not isinstance(game, dict):
+                    continue
+                item_id = _offer_id(game)
+                if not item_id or item_id in seen_ids:
+                    if item_id:
+                        log_event("offer.duplicate", offer_id=item_id, source=game.get("source"))
+                    continue
+                seen_ids.add(item_id)
+                merged.append(game)
+                active_next.append(iterator)
+                break
+        iterators = active_next
     return merged
 
 
@@ -205,7 +244,15 @@ async def _fetch_all(sources, moment: datetime) -> tuple[list[dict], bool]:
     results = await asyncio.gather(
         *(_fetch_source(name, SOURCES[name], moment) for name in enabled)
     )
-    merged = _verify(_merge([games for games, _ in results]), moment)
+    verified_per_source = []
+    total_rejected = 0
+    for games, _ in results:
+        verified, rejected = _filter_valid_offers(games, moment)
+        verified_per_source.append(verified)
+        total_rejected += rejected
+    merged = _merge(verified_per_source)
+    if total_rejected:
+        log_event("offers.filtered", rejected=total_rejected, kept=len(merged))
     for game in merged:
         log_event(
             "offer.detected",

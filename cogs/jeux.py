@@ -52,6 +52,21 @@ log = logging.getLogger(__name__)
 ROLES_CHANNEL_HINT = f"`#{config.ROLES_CHANNEL}`"
 
 
+def _valid_offer_list(response) -> list[dict]:
+    """Ne garde que les offres dict pourvues d'un identifiant non vide (`0` reste valide)."""
+    if not isinstance(response, list):
+        return []
+    valid = []
+    for game in response:
+        if not isinstance(game, dict):
+            continue
+        raw_id = game.get("id")
+        if raw_id is None or isinstance(raw_id, bool) or not str(raw_id).strip():
+            continue
+        valid.append(game)
+    return valid
+
+
 # ---------- Boutons de choix des rôles ----------
 
 
@@ -1171,26 +1186,40 @@ class Jeux(commands.Cog):
         *,
         mention: str,
         invite_url: str | None,
-    ) -> tuple[int, bool]:
+        already_sent: set[tuple[int, str]] | None = None,
+        unusable_channels: set[int] | None = None,
+    ) -> tuple[int, set[int]]:
         """Envoie une offre à ses salons cibles, une seule fois par salon.
 
         `targets` contient `(serveur, salon, rôle, clé anti-doublon)`. Retourne
-        `(annonces envoyées, au moins un salon prévenu)`.
+        `(annonces envoyées, serveurs ayant reçu au moins une annonce)`.
         """
-        embed, view = build_game_message(game, invite_url=invite_url)
-        item_id = str(game.get("id"))
+        if not targets:
+            return 0, set()
+        embed = view = None
+        item_id = str(game.get("id")).strip()
         sent = 0
+        notified_guilds: set[int] = set()
         for guild_id, channel_id, role_id, sent_key in targets:
-            if await database.is_sent(guild_id, sent_key):
+            if already_sent is not None:
+                if (guild_id, sent_key) in already_sent:
+                    continue
+            elif await database.is_sent(guild_id, sent_key):
+                continue
+            if unusable_channels is not None and channel_id in unusable_channels:
                 continue
             channel = self.bot.get_channel(channel_id)
             if channel is None:
+                if unusable_channels is not None:
+                    unusable_channels.add(channel_id)
                 log.warning(
                     "Salon %s du serveur %s introuvable ; relance /setup-auto pour le réparer",
                     channel_id,
                     guild_id,
                 )
                 continue
+            if embed is None:
+                embed, view = build_game_message(game, invite_url=invite_url)
             content = f"<@&{role_id}> {mention}" if role_id else None
             try:
                 await rate_limits.spaced_send(
@@ -1202,7 +1231,10 @@ class Jeux(commands.Cog):
                     allowed_mentions=discord.AllowedMentions(roles=True),
                 )
                 await database.mark_sent(guild_id, sent_key)
+                if already_sent is not None:
+                    already_sent.add((guild_id, sent_key))
                 sent += 1
+                notified_guilds.add(guild_id)
                 log_event(
                     "announce.sent",
                     offer_id=item_id,
@@ -1212,6 +1244,8 @@ class Jeux(commands.Cog):
                     offer_type=game.get("offer_type"),
                 )
             except discord.Forbidden as error:
+                if unusable_channels is not None:
+                    unusable_channels.add(channel_id)
                 monitoring.HEALTH.record_error()
                 log.warning(
                     "Discord refuse l'envoi sur le serveur %s (vérifie Voir les salons, "
@@ -1222,19 +1256,22 @@ class Jeux(commands.Cog):
             except discord.HTTPException as error:
                 monitoring.HEALTH.record_error()
                 log.warning("Envoi impossible sur le serveur %s : %s", guild_id, error)
-        return sent, sent > 0
+        return sent, notified_guilds
 
     async def _run_check_once(self, *, target_guild_id: int | None = None) -> int:
         """Envoie les offres pas encore annoncées. Retourne le nombre d'annonces.
 
         Séparation stricte : les jeux complets partent dans le salon de leur
-        plateforme, les DLC/contenus dans le salon unique des DLC. Une offre ne
-        peut donc plus atterrir dans les deux.
+        plateforme, les DLC/contenus dans le salon unique des DLC. Les plafonds
+        `MAX_GAMES` et `MAX_DLC_GAMES` comptent uniquement les nouvelles offres
+        réellement envoyées sur chaque serveur : les offres déjà annoncées, les
+        plateformes non suivies, un salon en erreur ou un autre serveur en
+        rattrapage ne bloquent jamais les nouveautés.
         """
         log_event("check.started", sources=len(config.OFFER_SOURCES))
         response = await offer_engine.fetch_offers()
-        log_event("check.fetched", offers=len(response))
-        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        log_event("check.fetched", offers=len(response) if isinstance(response, list) else 0)
+        games = _valid_offer_list(response)
         await database.save_giveaways(games)
         await database.set_bot_state("last_check_at", datetime.now(timezone.utc).isoformat())
         routes = await database.get_routes()
@@ -1252,42 +1289,92 @@ class Jeux(commands.Cog):
         new_games = []
         sent = 0
 
-        # 1️⃣ Jeux complets → un salon par plateforme.
-        game_offers = [game for game in games if not is_dlc_offer(game)][: config.MAX_GAMES]
+        game_offers = [game for game in games if not is_dlc_offer(game)]
+        dlc_offers = [game for game in games if is_dlc_offer(game)]
+
+        active_guilds = {route[0] for route in routes} | set(dlc_routes)
+        active_routes = {route[1] for route in routes}
+        candidate_keys = {
+            f"{str(game['id']).strip()}:{route}"
+            for game in game_offers
+            for route in active_routes
+            if platforms.matches(game, [route])
+        }
+        if dlc_routes:
+            candidate_keys.update(
+                f"{str(game['id']).strip()}:{config.DLC_ROUTE}" for game in dlc_offers
+            )
+        already_sent = await database.get_sent_pairs(active_guilds, candidate_keys)
+        unusable_channels: set[int] = set()
+        announced_games_by_guild: dict[int, int] = {}
+        announced_dlc_by_guild: dict[int, int] = {}
+
+        # 1️⃣ Jeux complets → un salon par plateforme (plafonné par serveur sur les nouveautés).
+        max_games = max(0, config.MAX_GAMES)
         for game in game_offers:
-            item_id = str(game.get("id"))
-            targets = [
-                (guild_id, channel_id, roles.get((guild_id, route)), f"{item_id}:{route}")
-                for guild_id, route, channel_id, _ in routes
-                if platforms.matches(game, [route])
-            ]
-            count, announced = await self._announce_offer(
-                game, targets, mention="nouveau jeu gratuit !", invite_url=invite_url
+            item_id = str(game["id"]).strip()
+            targets = []
+            for guild_id, route, channel_id, _ in routes:
+                if announced_games_by_guild.get(guild_id, 0) >= max_games:
+                    continue
+                sent_key = f"{item_id}:{route}"
+                if (guild_id, sent_key) in already_sent or channel_id in unusable_channels:
+                    continue
+                if not platforms.matches(game, [route]):
+                    continue
+                targets.append((guild_id, channel_id, roles.get((guild_id, route)), sent_key))
+            if not targets:
+                continue
+            count, notified_guilds = await self._announce_offer(
+                game,
+                targets,
+                mention="nouveau jeu gratuit !",
+                invite_url=invite_url,
+                already_sent=already_sent,
+                unusable_channels=unusable_channels,
             )
             sent += count
-            if announced:
+            if notified_guilds:
                 new_games.append(game)
+                for guild_id in notified_guilds:
+                    announced_games_by_guild[guild_id] = (
+                        announced_games_by_guild.get(guild_id, 0) + 1
+                    )
 
-        # 2️⃣ DLC et contenus → salon unique des DLC, dans la limite dédiée.
-        dlc_offers = [game for game in games if is_dlc_offer(game)][: config.MAX_DLC_GAMES]
+        # 2️⃣ DLC et contenus → salon unique des DLC, dans la limite dédiée par serveur.
+        max_dlc = max(0, config.MAX_DLC_GAMES)
         for game in dlc_offers:
-            item_id = str(game.get("id"))
+            item_id = str(game["id"]).strip()
             targets = []
             for guild_id, (channel_id, role_id) in dlc_routes.items():
+                if announced_dlc_by_guild.get(guild_id, 0) >= max_dlc:
+                    continue
+                sent_key = f"{item_id}:{config.DLC_ROUTE}"
+                if (guild_id, sent_key) in already_sent or channel_id in unusable_channels:
+                    continue
                 selection = guild_platforms.get(guild_id)
                 # Le salon des DLC respecte les plateformes suivies par le serveur ;
                 # une configuration historique sans sélection reçoit tout.
                 if selection is not None and not platforms.matches(game, selection):
                     continue
-                targets.append(
-                    (guild_id, channel_id, role_id, f"{item_id}:{config.DLC_ROUTE}")
-                )
-            count, announced = await self._announce_offer(
-                game, targets, mention="nouveau DLC gratuit !", invite_url=invite_url
+                targets.append((guild_id, channel_id, role_id, sent_key))
+            if not targets:
+                continue
+            count, notified_guilds = await self._announce_offer(
+                game,
+                targets,
+                mention="nouveau DLC gratuit !",
+                invite_url=invite_url,
+                already_sent=already_sent,
+                unusable_channels=unusable_channels,
             )
             sent += count
-            if announced:
+            if notified_guilds:
                 new_games.append(game)
+                for guild_id in notified_guilds:
+                    announced_dlc_by_guild[guild_id] = (
+                        announced_dlc_by_guild.get(guild_id, 0) + 1
+                    )
 
         log_event(
             "check.finished",
@@ -1398,9 +1485,7 @@ class Jeux(commands.Cog):
             )
             return
 
-        if not isinstance(response, list):
-            response = []
-        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        games = _valid_offer_list(response)
         await database.save_giveaways(games)
 
         preferences = await database.get_user_preferences(interaction.user.id)
@@ -1442,7 +1527,7 @@ class Jeux(commands.Cog):
             )
             return
 
-        games = [game for game in response if isinstance(game, dict) and game.get("id") is not None]
+        games = _valid_offer_list(response)
         await database.save_giveaways(games)
 
         preferences = await database.get_user_preferences(interaction.user.id)

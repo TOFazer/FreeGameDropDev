@@ -68,6 +68,21 @@ async def test_historique_des_envois(db):
     assert await db.is_sent(7, "1:steam") is False
 
 
+async def test_lecture_groupee_des_envois_par_lots(db):
+    """`get_sent_pairs` gère les entrées vides et les lots dépassant 900 paramètres SQLite."""
+    assert await db.get_sent_pairs([], ["1:steam"]) == set()
+    assert await db.get_sent_pairs([7], []) == set()
+
+    await db.mark_sent(7, "0:steam")
+    await db.mark_sent(7, "1150:epic")
+    await db.mark_sent(8, "42:steam")
+
+    candidats = [f"{i}:steam" for i in range(1200)] + ["1150:epic"]
+    trouves = await db.get_sent_pairs([7, 8, 9], candidats)
+
+    assert trouves == {(7, "0:steam"), (7, "1150:epic"), (8, "42:steam")}
+
+
 async def test_isolation_entre_serveurs(db):
     await db.set_roles_channel(7, 111)
     await db.set_roles_channel(8, 222)
